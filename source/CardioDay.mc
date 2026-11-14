@@ -1,5 +1,5 @@
 // Today's heart rate in 15-minute bins from the watch's own history, split into scrolling vs not scrolling.
-// The heart rate is real when the watch has history; the scroll sessions come from the Ledger (demo for now).
+// The heart rate is real when the watch has history; the scroll sessions come from Records (demo data until real sessions exist).
 import Toybox.Lang;
 import Toybox.Math;
 import Toybox.SensorHistory;
@@ -24,7 +24,18 @@ class CardioDay {
         return (s != null && r != null) ? Math.round(s - r).toNumber() : null;
     }
 
+    private function inAny(sessions as Array<Array<Number> >, minute as Number) as Boolean {
+        for (var i = 0; i < sessions.size(); i++) {
+            var s = sessions[i];
+            if (minute >= s[0] && minute <= s[1]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public function load() as Void {
+        var sessions = Records.todaySessions();
         var sums = new Array<Float>[BINS];
         var counts = new Array<Number>[BINS];
         for (var i = 0; i < BINS; i++) {
@@ -56,7 +67,7 @@ class CardioDay {
                         var b = minute / 15;
                         sums[b] += v.toFloat();
                         counts[b] += 1;
-                        if (Ledger.inSession(minute)) {
+                        if (inAny(sessions, minute)) {
                             inSum += v.toFloat();
                             inN += 1;
                         } else {
@@ -78,7 +89,7 @@ class CardioDay {
                 var hr = 56 + 18 * day + 3 * Math.sin(b * 1.7);
                 var scrolling = false;
                 for (var m = b * 15; m < b * 15 + 15; m++) {
-                    if (Ledger.inSession(m)) {
+                    if (inAny(sessions, m)) {
                         scrolling = true;
                         break;
                     }

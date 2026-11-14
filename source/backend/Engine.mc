@@ -16,6 +16,7 @@ module Engine {
     var _callback as Method()? = null;
     var _hr as Number? = null;
     var _temp as Float? = null;
+    var _info as Sensor.Info? = null;
     var _hour as Number = 0;
     var _inBed as Boolean = false;
     var _sessionSec as Number = 0;
@@ -31,8 +32,9 @@ module Engine {
             return;
         }
         Ledger.load();
+        Records.load();
         ScrollSource.start();
-        Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE, Sensor.SENSOR_TEMPERATURE]);
+        Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE, Sensor.SENSOR_TEMPERATURE, Sensor.SENSOR_PULSE_OXIMETRY]);
         Sensor.enableSensorEvents(new Lang.Method(Engine, :onSensor));
         var t = new Timer.Timer();
         _timer = t;
@@ -48,13 +50,20 @@ module Engine {
         ScrollSource.stop();
         closeSession();
         Ledger.save();
+        Records.save();
         Sensor.enableSensorEvents(null);
         Sensor.setEnabledSensors([]);
     }
 
     function onSensor(info as Sensor.Info) as Void {
+        _info = info;
         _hr = info.heartRate;
         _temp = info.temperature;
+    }
+
+    // The latest sensor reading; only one enableSensorEvents listener may exist, so the UI reads this.
+    function lastInfo() as Sensor.Info? {
+        return _info;
     }
 
     function tick() as Void {
@@ -62,6 +71,9 @@ module Engine {
         var t = _temp;
         _inBed = t != null && t >= IN_BED_TEMP_C;
         if (ScrollSource.isScrolling()) {
+            if (_sessionSec == 0) {
+                Records.openSession();
+            }
             var charged = Ledger.chargeScroll(1, _hour, _inBed);
             _sessionSec += 1;
             _sessionCharged += charged;
@@ -69,6 +81,7 @@ module Engine {
                 _sessionNight = true;
             }
             var hr = _hr;
+            Records.addScrollSecond(hr, charged);
             if (hr != null) {
                 _hrSum += hr;
                 _hrCount += 1;
@@ -79,11 +92,13 @@ module Engine {
             _sinceSave += 1;
             if (_sinceSave >= SAVE_EVERY_SEC) {
                 Ledger.save();
+                Records.save();
                 _sinceSave = 0;
             }
         } else if (_sessionSec > 0) {
             closeSession();
             Ledger.save();
+            Records.save();
             _sinceSave = 0;
         }
         var cb = _callback;
@@ -93,6 +108,7 @@ module Engine {
     }
 
     function closeSession() as Void {
+        Records.closeSession();
         if (_sessionSec > 0) {
             Ledger.closeScrollSession(_sessionSec, _sessionCharged, _sessionNight);
         }

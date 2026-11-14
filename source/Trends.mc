@@ -1,4 +1,4 @@
-// Trend pages: what scrolling costs over a day or a week, drawn from Thumb Tax's own ledger.
+// Trend pages: what scrolling costs over a day or a week, drawn from Thumb Tax's own records.
 // Each page has the same frame: icon + title, WEEK/TODAY pill, headline number, chart, axis, insight line.
 import Toybox.Graphics;
 import Toybox.Lang;
@@ -19,26 +19,33 @@ module Trends {
         frame(dc, off, "SCROLL TAX", RED, :phone, weekly, true);
         var b = box(dc, off);
         if (weekly) {
-            var taxed = Ledger.weekTaxed();
-            var pct = Math.round((taxed - Ledger.LAST_WEEK_TAXED) * 100.0 / Ledger.LAST_WEEK_TAXED).toNumber();
-            headline(dc, off, "-" + Ledger.fmtMin(taxed), RED,
-                (pct <= 0 ? "down " + (-pct) : "up " + pct) + "% vs last week");
+            var taxed = Records.weekTaxed();
+            var last = Records.lastWeekTaxed();
+            var cmp = "no data last week";
+            if (last > 0) {
+                var pct = Math.round((taxed - last) * 100.0 / last).toNumber();
+                cmp = (pct <= 0 ? "down " + (-pct) : "up " + pct) + "% vs last week";
+            }
+            var dayMin = Records.weekDayMin();
+            var nightMin = Records.weekNightMin();
+            headline(dc, off, "-" + Records.fmtMin(taxed), RED, cmp);
             var hi = 0;
             for (var i = 0; i < 7; i++) {
-                var s = Ledger.WEEK_DAY_MIN[i] + Ledger.WEEK_NIGHT_MIN[i];
+                var s = dayMin[i] + nightMin[i];
                 if (s > hi) { hi = s; }
             }
-            Chart.bars(dc, b[0], b[1], b[2], b[3], Ledger.WEEK_DAY_MIN, fill(7, RED),
-                Ledger.WEEK_NIGHT_MIN, NIGHT, 0.0, hi.toFloat(), 6);
-            Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Ledger.weekLabels(), 6);
+            Chart.bars(dc, b[0], b[1], b[2], b[3], dayMin, fill(7, RED),
+                nightMin, NIGHT, 0.0, hi.toFloat(), 6);
+            Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Records.weekLabels(), 6);
         } else {
-            headline(dc, off, "-" + Ledger.fmtMin(Ledger.todayTaxed()), RED, "taxed so far today");
+            var hourly = Records.todayHourlyMin();
+            headline(dc, off, "-" + Records.fmtMin(Records.todayTaxed()), RED, "taxed so far today");
             var colors = [] as Array<Number>;
             for (var h = 0; h < 24; h++) {
-                colors.add(Ledger.isNightHour(h) ? NIGHT : RED);
+                colors.add(Records.isNightHour(h) ? NIGHT : RED);
             }
-            Chart.bars(dc, b[0], b[1], b[2], b[3], Ledger.TODAY_HOURLY_MIN, colors, null, 0,
-                0.0, Chart.maxOf(Ledger.TODAY_HOURLY_MIN).toFloat(), -1);
+            Chart.bars(dc, b[0], b[1], b[2], b[3], hourly, colors, null, 0,
+                0.0, Chart.maxOf(hourly).toFloat(), -1);
             Chart.tickLabels(dc, b[0], axisY(dc, off), b[2], ["0", "6", "12", "18", "24"]);
         }
         legend(dc, off, RED, "day", NIGHT, "night x2");
@@ -48,21 +55,22 @@ module Trends {
         frame(dc, off, "SLEEP DEBT", NIGHT, :moon, weekly, true);
         var b = box(dc, off);
         if (weekly) {
-            var total = Ledger.sum(Ledger.WEEK_NIGHT_MIN);
-            headline(dc, off, "-" + Ledger.fmtMin(total), NIGHT, "sleep withdrawn this week");
+            var night = Records.weekNightMin();
+            var total = Records.sum(night);
+            headline(dc, off, "-" + Records.fmtMin(total), NIGHT, "sleep withdrawn this week");
             var worst = 0;
             for (var i = 1; i < 7; i++) {
-                if (Ledger.WEEK_NIGHT_MIN[i] > Ledger.WEEK_NIGHT_MIN[worst]) { worst = i; }
+                if (night[i] > night[worst]) { worst = i; }
             }
-            Chart.bars(dc, b[0], b[1], b[2], b[3], Ledger.WEEK_NIGHT_MIN, fill(7, NIGHT), null, 0,
-                0.0, Chart.maxOf(Ledger.WEEK_NIGHT_MIN).toFloat(), 6);
-            Chart.ref(dc, b[0], b[1], b[2], b[3], Ledger.SCROLL_NIGHT_MIN.toFloat(), 0.0,
-                Chart.maxOf(Ledger.WEEK_NIGHT_MIN).toFloat());
-            Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Ledger.weekLabels(), 6);
-            insight(dc, off, "worst: " + Ledger.dayName(worst) + " night, " + Ledger.WEEK_NIGHT_MIN[worst] + " min");
+            Chart.bars(dc, b[0], b[1], b[2], b[3], night, fill(7, NIGHT), null, 0,
+                0.0, Chart.maxOf(night).toFloat(), 6);
+            Chart.ref(dc, b[0], b[1], b[2], b[3], Records.SCROLL_NIGHT_MIN.toFloat(), 0.0,
+                Chart.maxOf(night).toFloat());
+            Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Records.weekLabels(), 6);
+            insight(dc, off, "worst: " + Records.dayName(worst) + " night, " + night[worst] + " min");
         } else {
-            var bins = Ledger.LAST_NIGHT_BINS;
-            headline(dc, off, "-" + Ledger.fmtMin(Ledger.sum(bins)), NIGHT, "lost last night");
+            var bins = Records.lastNightBins();
+            headline(dc, off, "-" + Records.fmtMin(Records.sum(bins)), NIGHT, "lost last night");
             Chart.bars(dc, b[0], b[1], b[2], b[3], bins, fill(bins.size(), NIGHT), null, 0,
                 0.0, Chart.maxOf(bins).toFloat(), -1);
             Chart.tickLabels(dc, b[0], axisY(dc, off), b[2], ["8p", "11p", "2a", "5a", "8a"]);
@@ -75,8 +83,8 @@ module Trends {
                 }
             }
             if (first >= 0) {
-                insight(dc, off, "scrolled " + clock(Ledger.LAST_NIGHT_START_HOUR + first) + " to "
-                    + clock(Ledger.LAST_NIGHT_START_HOUR + last + 1));
+                insight(dc, off, "scrolled " + clock(Records.LAST_NIGHT_START_HOUR + first) + " to "
+                    + clock(Records.LAST_NIGHT_START_HOUR + last + 1));
             } else {
                 insight(dc, off, "clean night");
             }
@@ -87,19 +95,19 @@ module Trends {
         frame(dc, off, "CARDIO", HR, :heart, weekly, weekly || cd.demo);
         var b = box(dc, off);
         if (weekly) {
-            var lifts = Ledger.WEEK_HR_LIFT;
-            var avg = Math.round(Ledger.sum(lifts).toFloat() / lifts.size()).toNumber();
+            var lifts = Records.weekHrLift();
+            var avg = Math.round(Records.sum(lifts).toFloat() / lifts.size()).toNumber();
             headline(dc, off, "+" + avg + " bpm", HR, "avg lift while scrolling");
             Chart.bars(dc, b[0], b[1], b[2], b[3], lifts, fill(7, HR), null, 0,
                 0.0, Chart.maxOf(lifts).toFloat(), 6);
-            Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Ledger.weekLabels(), 6);
+            Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Records.weekLabels(), 6);
             insight(dc, off, "higher = harder to wind down");
         } else {
             var lift = cd.lift();
             headline(dc, off, (lift != null) ? ((lift >= 0 ? "+" : "") + lift + " bpm") : "--", HR,
                 "while scrolling today");
             var r = cd.range();
-            Chart.bands(dc, b[0], b[1], b[2], b[3], Ledger.TODAY_SESSIONS, 1440, BAND);
+            Chart.bands(dc, b[0], b[1], b[2], b[3], Records.todaySessions(), 1440, BAND);
             Chart.baseline(dc, b[0], b[1] + b[3], b[2]);
             var rest = cd.restAvg;
             if (rest != null) {
@@ -116,20 +124,21 @@ module Trends {
         frame(dc, off, "TAX RETURNS", GREEN, :coin, weekly, true);
         var b = box(dc, off);
         if (weekly) {
-            var earned = Ledger.sum(Ledger.WEEK_EARNED_MIN);
+            var earnedMin = Records.weekEarnedMin();
+            var earned = Records.sum(earnedMin);
             var taxed = [] as Array<Number>;
             for (var i = 0; i < 7; i++) {
-                taxed.add(Ledger.taxedOn(i));
+                taxed.add(Records.taxedOn(i));
             }
-            headline(dc, off, "+" + Ledger.fmtMin(earned), GREEN, "earned back this week");
-            Chart.pairs(dc, b[0], b[1], b[2], b[3], Ledger.WEEK_EARNED_MIN, GREEN, taxed, RED,
+            headline(dc, off, "+" + Records.fmtMin(earned), GREEN, "earned back this week");
+            Chart.pairs(dc, b[0], b[1], b[2], b[3], earnedMin, GREEN, taxed, RED,
                 Chart.maxOf(taxed).toFloat(), 6);
-            Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Ledger.weekLabels(), 6);
-            var net = earned - Ledger.weekTaxed();
-            legend(dc, off, GREEN, "earned", RED, "net " + (net >= 0 ? "+" : "-") + Ledger.fmtMin(net));
+            Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Records.weekLabels(), 6);
+            var net = earned - Records.weekTaxed();
+            legend(dc, off, GREEN, "earned", RED, "net " + (net >= 0 ? "+" : "-") + Records.fmtMin(net));
         } else {
-            var hourly = Ledger.TODAY_EARNED_HOURLY;
-            headline(dc, off, "+" + Ledger.fmtMin(Ledger.sum(hourly)), GREEN, "earned today");
+            var hourly = Records.todayEarnedHourly();
+            headline(dc, off, "+" + Records.fmtMin(Records.sum(hourly)), GREEN, "earned today");
             Chart.bars(dc, b[0], b[1], b[2], b[3], hourly, fill(24, GREEN), null, 0,
                 0.0, Chart.maxOf(hourly).toFloat(), -1);
             Chart.tickLabels(dc, b[0], axisY(dc, off), b[2], ["0", "6", "12", "18", "24"]);
@@ -141,15 +150,19 @@ module Trends {
     function pulseOx(dc as Dc, off as Number) as Void {
         frame(dc, off, "PULSE OX", SPO2, :drop, true, true);
         var b = box(dc, off);
-        var spo2 = Ledger.WEEK_SPO2;
+        var spo2 = Records.weekSpo2();
+        var night = Records.weekNightMin();
         var colors = [] as Array<Number>;
         var sSum = 0;
         var sN = 0;
         var cSum = 0;
         var cN = 0;
         for (var i = 0; i < 7; i++) {
-            var scrolled = Ledger.WEEK_NIGHT_MIN[i] > Ledger.SCROLL_NIGHT_MIN;
+            var scrolled = night[i] > Records.SCROLL_NIGHT_MIN;
             colors.add(scrolled ? RED : SPO2);
+            if (spo2[i] <= 0) {
+                continue;
+            }
             if (scrolled) {
                 sSum += spo2[i];
                 sN += 1;
@@ -164,8 +177,9 @@ module Trends {
         headline(dc, off, (diff != null) ? ((diff > 0 ? "+" : "") + diff + "%") : "--", SPO2,
             "scroll nights vs clean");
         Chart.bars(dc, b[0], b[1], b[2], b[3], spo2, colors, null, 0, 88.0, 100.0, 6);
-        Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Ledger.weekLabels(), 6);
-        legend(dc, off, RED, "scroll " + fmt(sAvg) + "%", SPO2, "clean " + fmt(cAvg) + "%");
+        Chart.slotLabels(dc, b[0], axisY(dc, off), b[2], Records.weekLabels(), 6);
+        legend(dc, off, RED, "scroll " + fmt(sAvg) + ((sAvg != null) ? "%" : ""), SPO2,
+            "clean " + fmt(cAvg) + ((cAvg != null) ? "%" : ""));
     }
 
     // ---- Frame pieces ----
@@ -194,7 +208,7 @@ module Trends {
 
         // Mode pill.
         var mode = weekly ? "WEEK" : "TODAY";
-        if (demo && Ledger.DEMO) {
+        if (demo && Records.isDemo()) {
             mode += " · demo";
         }
         var py = off + (h * 0.215).toNumber();

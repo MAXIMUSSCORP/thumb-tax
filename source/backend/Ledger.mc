@@ -50,7 +50,7 @@ module Ledger {
         }
     }
 
-    function reset() as Void {
+    function clear() as Void {
         _loaded = true;
         _balance = 0;
         _dayKey = today();
@@ -58,11 +58,16 @@ module Ledger {
         _history = [];
     }
 
+    function reset() as Void {
+        clear();
+        Records.reset();
+    }
+
     function load() as Void {
         if (_loaded) {
             return;
         }
-        reset();
+        clear();
         var s = Application.Storage;
         var b = s.getValue("lg_bal");
         if (b == null) {
@@ -175,7 +180,9 @@ module Ledger {
         _balance += sec;
         _earned += sec;
         addHistory(sec, why);
+        Records.addEarned(sec);
         save();
+        Records.save();
         return sec;
     }
 

@@ -1,5 +1,5 @@
 // Sensor screen. Page 0 is the live summary (is a phone in hand right now?).
-// Pages 1-5 are trends from Thumb Tax's own ledger: scroll tax, sleep debt, cardio, tax returns, pulse ox.
+// Pages 1-5 are trends from Thumb Tax's own records: scroll tax, sleep debt, cardio, tax returns, pulse ox.
 // START re-baselines on page 0 and toggles WEEK / TODAY on the trend pages.
 import Toybox.Graphics;
 import Toybox.Lang;
@@ -30,21 +30,36 @@ class ThumbTaxView extends WatchUi.View {
     private var _page as Number = 0;
     private var _scroll as Float = 0.0;
     private var _anim as Timer.Timer or Null = null;
+    private var _poll as Timer.Timer or Null = null;
 
     public function initialize() {
         View.initialize();
     }
 
     public function onShow() as Void {
-        Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE, Sensor.SENSOR_TEMPERATURE, Sensor.SENSOR_PULSE_OXIMETRY]);
-        Sensor.enableSensorEvents(method(:onSensor));
         _cardio.load();
+        // The Engine owns the only sensor listener; read its latest sample once a second.
+        var t = new Timer.Timer();
+        t.start(method(:onPoll), 1000, true);
+        _poll = t;
     }
 
     public function onHide() as Void {
-        Sensor.enableSensorEvents(null);
-        Sensor.setEnabledSensors([]);
+        var t = _poll;
+        if (t != null) {
+            t.stop();
+        }
+        _poll = null;
         stopAnim();
+    }
+
+    public function onPoll() as Void {
+        var info = Engine.lastInfo();
+        if (info != null) {
+            onSensor(info);
+        } else if (_scroll < 1.0) {
+            WatchUi.requestUpdate();
+        }
     }
 
     // START: re-baseline on the summary, switch WEEK / TODAY on trend pages.
@@ -173,7 +188,11 @@ class ThumbTaxView extends WatchUi.View {
         var mag = _mag;
         var base = _base;
         var d = delta();
-        var phone = d != null && d.abs() > PHONE_DELTA;
+        var st = Engine.state();
+        var scrolling = st[:scrolling];
+        var bal = st[:balanceSec];
+        // Magnetometer is the real-watch detector; the Engine flag covers the phone-side/manual signal in the simulator.
+        var phone = (d != null && d.abs() > PHONE_DELTA) || (scrolling != null && scrolling == true);
 
         var w = dc.getWidth();
         var h = dc.getHeight();
@@ -184,10 +203,15 @@ class ThumbTaxView extends WatchUi.View {
         drawGauge(dc, cx, h / 2 + off, w / 2 - 6, d, accent);
 
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, off + (h * 0.13).toNumber(), Graphics.FONT_XTINY, "THUMB TAX", c);
+        var title = "THUMB TAX";
+        if (bal != null) {
+            var sec = bal as Number;
+            title += "  " + (sec < 0 ? "-" : "+") + Records.fmtMin(sec.abs() / 60);
+        }
+        dc.drawText(cx, off + (h * 0.13).toNumber(), Graphics.FONT_XTINY, title, c);
 
         var sy = off + (h * 0.24).toNumber();
-        var status = (d == null) ? "WAITING" : (phone ? "PHONE?" : "NO PHONE");
+        var status = (d == null && !phone) ? "WAITING" : (phone ? "PHONE?" : "NO PHONE");
         var sw = dc.getTextWidthInPixels(status, Graphics.FONT_XTINY);
         Icons.magnet(dc, cx - sw / 2 - 10, sy + 1, 10, accent);
         dc.setColor(accent, Graphics.COLOR_TRANSPARENT);

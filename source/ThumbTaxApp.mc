@@ -9,6 +9,14 @@ class ThumbTaxApp extends Application.AppBase {
         AppBase.initialize();
     }
 
+    public function onStart(state as Dictionary?) as Void {
+        Engine.start();
+    }
+
+    public function onStop(state as Dictionary?) as Void {
+        Engine.stop();
+    }
+
     public function getInitialView() as [Views] or [Views, InputDelegates] {
         var view = new $.AvatarView();
         return [view, new $.AvatarDelegate(view)];
