@@ -1,0 +1,29 @@
+# Build output
+bin/
+gen/
+mir/
+*.prg
+*.prg.debug.xml
+*.iq
+
+# Keys and secrets
+developer_key
+*.der
+*.pem
+
+# Editor settings that may hold local paths
+.vscode/settings.json
+
+# Claude working files
+.claude/notepad.md
+.claude/plans/
+
+# OS junk
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Private working docs, kept local only
+CLAUDE.md
+PLAN.md
+PROGRESS.md
