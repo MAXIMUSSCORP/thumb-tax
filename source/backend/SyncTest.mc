@@ -86,4 +86,13 @@ module SyncTest {
         Test.assertEqual(b["ngrok-skip-browser-warning"], "1");
         return true;
     }
+
+    (:test)
+    function pollDueCases(logger as Logger) as Boolean {
+        Test.assert(Sync.pollDue(null, 5));
+        Test.assert(!Sync.pollDue(1000, 1000 + POLL_MS - 1));
+        Test.assert(Sync.pollDue(1000, 1000 + POLL_MS));
+        Test.assert(Sync.pollDue(9000, 100));
+        return true;
+    }
 }

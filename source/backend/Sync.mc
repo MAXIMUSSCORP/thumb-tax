@@ -5,7 +5,6 @@ import Toybox.Communications;
 import Toybox.Lang;
 import Toybox.Math;
 import Toybox.System;
-import Toybox.Timer;
 
 // Real devices require HTTPS and route requests through the paired phone;
 // only the simulator can reach http://127.0.0.1 directly.
@@ -24,7 +23,8 @@ const IN_FLIGHT_TIMEOUT_MS = 10000;
 const SYNC_KEY = "sy";
 
 module Sync {
-    var _timer as Timer.Timer? = null;
+    var _on as Boolean = false;
+    var _lastPumpMs as Number? = null;
     var _seenDay as String? = null;
     var _seen as Number = 0;
     var _seenEpoch as String? = null;
@@ -117,7 +117,7 @@ module Sync {
     }
 
     function start() as Void {
-        if (_timer != null) {
+        if (_on) {
             return;
         }
         var v = Application.Storage.getValue(SYNC_KEY);
@@ -133,18 +133,26 @@ module Sync {
                 _seenEpoch = e instanceof String ? e : null;
             }
         }
-        var t = new Timer.Timer();
-        _timer = t;
-        t.start(new Lang.Method(Sync, :pump), POLL_MS, true);
+        _on = true;
+        _lastPumpMs = System.getTimer();
         pump();
     }
 
-    function stop() as Void {
-        var t = _timer;
-        if (t != null) {
-            t.stop();
+    // First call or a clock wrap (now < last) is due; otherwise wait POLL_MS.
+    function pollDue(lastMs as Number?, nowMs as Number) as Boolean {
+        return lastMs == null || nowMs < lastMs || nowMs - lastMs >= POLL_MS;
+    }
+
+    // Engine's 1 s tick drives polling; Sync owns no Timer.
+    function tick(nowMs as Number) as Void {
+        if (_on && pollDue(_lastPumpMs, nowMs)) {
+            _lastPumpMs = nowMs;
+            pump();
         }
-        _timer = null;
+    }
+
+    function stop() as Void {
+        _on = false;
         _inFlight = false;
         save();
     }

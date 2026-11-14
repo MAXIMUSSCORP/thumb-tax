@@ -4,7 +4,6 @@ import Toybox.Lang;
 import Toybox.Math;
 import Toybox.Time;
 import Toybox.Time.Gregorian;
-import Toybox.Timer;
 import Toybox.Sensor;
 import Toybox.Position;
 import Toybox.ActivityMonitor;
@@ -28,7 +27,6 @@ module Activities {
     class Callbacks {
         function onAccel(data as Sensor.SensorData) as Void { Activities.onAccel(data); }
         function onPosition(info as Position.Info) as Void { Activities.onPosition(info); }
-        function onTick() as Void { Activities.onTick(); }
     }
     var _cb = new Callbacks();
 
@@ -41,7 +39,6 @@ module Activities {
     var _estimated as Boolean = false;
     var _valid as Boolean = true;
     var _hint as String = "";
-    var _timer as Timer.Timer or Null = null;
 
     var _repState as Dictionary = {};
     var _gotAccel as Boolean = false;
@@ -257,10 +254,6 @@ module Activities {
         } else {
             _hint = "Starting";
         }
-        if (det != :walk && det != :floors) {
-            _timer = new Timer.Timer();
-            _timer.start(_cb.method(:onTick), 1000, true);
-        }
         Badges.onActivityStart(kind);
         return true;
     }
@@ -352,10 +345,6 @@ module Activities {
     }
 
     function teardown() as Void {
-        if (_timer != null) {
-            _timer.stop();
-            _timer = null;
-        }
         if (_det == :reps || _det == :tilt) {
             try {
                 Sensor.unregisterSensorDataListener();
@@ -492,7 +481,8 @@ module Activities {
         return (_steps[_steps.size() - 1] - _steps[0]) * 60 / (_steps.size() - 1);
     }
 
-    function onTick() as Void {
+    // Called once per second by Engine; no-op when nothing runs. Activities owns no Timer.
+    function tick() as Void {
         var det = _det;
         if (_kind == null || det == null) {
             return;

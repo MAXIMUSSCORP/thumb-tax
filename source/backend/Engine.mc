@@ -1,3 +1,5 @@
+// The Engine owns the only backend Timer; Connect IQ limits timers. Sync and Activities are driven
+// from tick(), and the UI redraws through Engine.onChange.
 // Why this exists: the 1 Hz heartbeat that turns "user is scrolling" into ledger charges.
 // The UI only reads Engine.state() and registers one change callback.
 import Toybox.Attention;
@@ -79,6 +81,10 @@ module Engine {
 
     function tick() as Void {
         var overBuzz = false;
+        try {
+            Activities.tick();
+        } catch (ex) {
+        }
         var scrolling = Sync.takeSecond();
         _hour = System.getClockTime().hour;
         var t = _temp;
@@ -123,6 +129,10 @@ module Engine {
             badgeVibrate();
         } else if (overBuzz) {
             vibrate();
+        }
+        try {
+            Sync.tick(System.getTimer());
+        } catch (ex) {
         }
         var cb = _callback;
         if (cb != null) {
