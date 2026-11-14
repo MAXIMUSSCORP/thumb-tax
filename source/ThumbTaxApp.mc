@@ -10,7 +10,7 @@ class ThumbTaxApp extends Application.AppBase {
     }
 
     public function getInitialView() as [Views] or [Views, InputDelegates] {
-        var view = new $.ThumbTaxView();
-        return [view, new $.ThumbTaxDelegate(view)];
+        var view = new $.AvatarView();
+        return [view, new $.AvatarDelegate(view)];
     }
 }
