@@ -21,6 +21,9 @@ The server is the bank. It holds one signed balance in seconds (`balanceSec`, po
 | POST /state | activity (string, "" or null) and/or pendingChargeSec (integer >= 0), source | 200 full state, 400 if neither is given |
 | POST /ledger | deltaSec, reason, source, optional session, eventId, activity, pendingChargeSec | 200 full state plus applied and lastEventId, 400 bad input |
 | POST /usage | usedMinutesToday 0..1440, optional day YYYY-MM-DD, optional reset | 200 full state, 400 bad input, 409 stale day or decrease |
+| POST /badge | id, one of the watch's badge strings (fc, pw, ls, d1, d3, d5, dk, sm, ds, pa, dw, af, wo, r1, r2, r5, ll, dd, fu, sr); same key rules as /state | 200 full state, 400 `{"error":"unknown badge"}` |
+
+Demo only: POST /badge sets `badgeCommand` to `{seq, id, at}` (seq goes up by 1 per accepted request, starting at 1; the ledger is untouched). Full state always carries `badgeCommand`, null until the first request; the watch unlocks that badge when it sees a new seq.
 | OPTIONS any | none | 204 with CORS headers |
 
 Full state has balanceSec, pendingChargeSec, taxMinutes, creditMinutes, history, activity, usedMinutesToday, usageDay, usageEpoch, usageUpdatedAt, source, updatedAt.

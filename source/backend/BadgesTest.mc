@@ -238,4 +238,33 @@ module BadgesTest {
         Test.assertEqual(Badges.all().size(), Badges.IDS.size());
         return true;
     }
+
+    (:test)
+    function demoAwardShowsAndBuzzes(logger as Logger) as Boolean {
+        Badges.reset();
+        Test.assert(Badges.demoAward(:perfectWeek));
+        Test.assertEqual(Badges.earnedCount(:perfectWeek), 1);
+        Test.assert(Badges.lastEarnedAt(:perfectWeek) != null);
+        Test.assertEqual(Badges.unseen()[0], :perfectWeek);
+        Test.assert(Badges.takeBuzz());
+        Badges.markSeen();
+        Test.assert(Badges.demoAward(:firstClose));
+        Badges.markSeen();
+        Test.assert(Badges.demoAward(:firstClose));
+        Test.assertEqual(Badges.earnedCount(:firstClose), 1);
+        Test.assertEqual(Badges.unseen().size(), 1);
+        Test.assert(Badges.takeBuzz());
+        Badges.reset();
+        return true;
+    }
+
+    (:test)
+    function demoAwardUnknown(logger as Logger) as Boolean {
+        Badges.reset();
+        Test.assert(!Badges.demoAward(:nope));
+        Test.assertEqual(Badges.unseen().size(), 0);
+        Test.assert(!Badges.takeBuzz());
+        Badges.reset();
+        return true;
+    }
 }

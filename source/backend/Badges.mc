@@ -424,6 +424,25 @@ module Badges {
         _buzz = true;
     }
 
+    // Demo only: awards like a real award, but a once-only badge that is already earned still re-shows and buzzes.
+    function demoAward(id as Symbol) as Boolean {
+        load();
+        var i = IDS.indexOf(id);
+        if (i < 0) {
+            return false;
+        }
+        if (_cnt[i] == 0 || (DEFS[i][2] as Boolean)) {
+            _cnt[i] += 1;
+        }
+        _lastAt[i] = Time.now().value();
+        if (_unseen.indexOf(STRS[i]) < 0) {
+            _unseen.add(STRS[i]);
+        }
+        _buzz = true;
+        save();
+        return true;
+    }
+
     function ringAdd(offset as Number) as Void {
         var slot = (_dayKey % RING_DAYS) * 2 + offset;
         _ring[slot] += 1;

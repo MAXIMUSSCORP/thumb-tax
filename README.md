@@ -14,9 +14,13 @@ Doomscrolling costs sleep and focus, and it costs the most late at night, when o
 
 The watch's live scroll meter in the Connect IQ simulator (fenix 7 Pro): OVERDRAFT, x1 day rate, -1:42 min of sleep while scrolling, bank at -29 s, and the payoff suggestion.
 
+![Watch new-badge screen](docs/screenshots/watch-new-badge.png)
+
+A badge unlocked from the control panel: the watch shows its new-badge screen for Perfect Week within a few seconds.
+
 ![Server control panel](docs/screenshots/control-panel.jpg)
 
-The server's control panel: -4 min of debt with apps blocked, the +/-5 and 15 minute buttons, Clear debt, the watch's suggestion and the recent transactions from the watch.
+The server's control panel: -4 min of debt with apps blocked, the +/-5 and 15 minute buttons, Clear debt, the watch's suggestion and the recent transactions from the watch. It can also unlock any badge on the watch for demos, from a badge list with "Unlock on watch".
 
 iPhone screenshots (`docs/screenshots/iphone-blocked.png`) are to be added by the iOS developer.
 
@@ -40,7 +44,7 @@ Three parts share one bank. The server holds the balance. The watch and the pane
 | Server (`server/server.js`) | Holds `balanceSec`. `taxMinutes` and `creditMinutes` are derived: the balance minus phone minutes not yet charged. Takes numbered transactions on `POST /ledger` (watch, panel), the iPhone's running total on `POST /usage`, and serves `GET /state`. Plain Node, no dependencies, behind a public HTTPS Cloudflare tunnel. Calls need the `x-api-key` header. Contract in `server/README.md` |
 | Watch app (`source/`, fenix 7 Pro) | Turns new phone minutes into charges: day x1, night x2, in bed x3. Verifies activities with sensors. Sends each charge or credit as a numbered transaction that the server applies once. Mirrors the server balance. Ranks payoff suggestions by time. Awards badges and draws trends. One Timer in `Engine.mc` drives the whole backend |
 | iPhone app (`ios/`, WatchLock, SwiftUI + Screen Time) | Reads `GET /state` every 3 s. Blocks the chosen apps while `taxMinutes` is above 0 and shows the watch's suggestion. Shows a green screen with the earned time when clear. "Scroll anyway" adds 5 minutes of use through `POST /usage` |
-| Control panel (served by the server at `/`) | Adds or removes minutes on the same balance, a phone-usage stand-in for demos, and a list of recent transactions |
+| Control panel (served by the server at `/`) | Adds or removes minutes on the same balance, a phone-usage stand-in for demos, a list of recent transactions, and a badge list with "Unlock on watch" that unlocks any badge on the watch for demos, sent through `POST /badge` |
 
 ### Watch backend
 

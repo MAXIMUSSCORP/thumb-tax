@@ -226,4 +226,39 @@ module SyncTest {
         Test.assert(Sync.pollDue(9000, 100));
         return true;
     }
+
+    (:test)
+    function badgeToAwardCases(logger as Logger) as Boolean {
+        var c = {"seq" => 5, "id" => "pw"};
+        var r = Sync.badgeToAward(3, false, null);
+        Test.assert(r[0] == null);
+        Test.assertEqual(r[1], 3);
+        r = Sync.badgeToAward(0, true, c);
+        Test.assert(r[0] == null);
+        Test.assertEqual(r[1], 5);
+        r = Sync.badgeToAward(4, false, c);
+        Test.assertEqual(r[0], "pw");
+        Test.assertEqual(r[1], 5);
+        r = Sync.badgeToAward(5, false, c);
+        Test.assert(r[0] == null);
+        Test.assertEqual(r[1], 5);
+        r = Sync.badgeToAward(9, false, c);
+        Test.assert(r[0] == null);
+        Test.assertEqual(r[1], 9);
+        r = Sync.badgeToAward(1, false, {"seq" => 2, "id" => "zz"});
+        Test.assert(r[0] == null);
+        Test.assertEqual(r[1], 2);
+        return true;
+    }
+
+    (:test)
+    function badgeSeqRestore(logger as Logger) as Boolean {
+        Sync.restore(["d", 5, 7, "e"]);
+        Test.assertEqual(Sync._lastBadgeSeq, 0);
+        Sync.restore(["d", 5, 7, "e", "s", 1, 0, "", null, null, null, 8]);
+        Test.assertEqual(Sync._lastBadgeSeq, 8);
+        Sync.restore(["d", 5, 7, "e"]);
+        Test.assertEqual(Sync._lastBadgeSeq, 0);
+        return true;
+    }
 }

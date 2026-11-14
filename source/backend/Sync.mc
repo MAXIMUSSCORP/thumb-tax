@@ -54,6 +54,9 @@ module Sync {
     var _unsentReason as String = "";
     var _inflight as Dictionary? = null;
     var _reqLedger as Boolean = false;
+    // Last demo badge request acted on; _badgeSeen is false until the first reply after start.
+    var _lastBadgeSeq as Number = 0;
+    var _badgeSeen as Boolean = false;
 
     function base36(n as Number) as String {
         var digits = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -293,6 +296,22 @@ module Sync {
         };
     }
 
+    // Returns [award id String or null, new last seq]. A first reply with nothing stored is an old request: store only.
+    function badgeToAward(lastSeq as Number, firstSync as Boolean, cmd as Dictionary?) as Array {
+        if (cmd == null) {
+            return [null, lastSeq];
+        }
+        var seq = cmd["seq"];
+        var id = cmd["id"];
+        if (!(seq instanceof Number) || !(id instanceof String) || seq <= lastSeq) {
+            return [null, lastSeq];
+        }
+        if (firstSync || Badges.strToId(id) == null) {
+            return [null, seq];
+        }
+        return [id, seq];
+    }
+
     // Loads a stored "sy" value; older 3 and 4 element shapes keep working.
     function restore(v as Object?) as Void {
         if (!(v instanceof Array) || v.size() < 3) {
@@ -309,6 +328,8 @@ module Sync {
         _pendingSec = p;
         var e = v.size() >= 4 ? v[3] : null;
         _seenEpoch = e instanceof String ? e : null;
+        var bs = v.size() >= 12 ? v[11] : null;
+        _lastBadgeSeq = bs instanceof Number ? bs : 0;
         if (v.size() < 11) {
             return;
         }
@@ -361,7 +382,7 @@ module Sync {
     function save() as Void {
         var inf = _inflight;
         Application.Storage.setValue(SYNC_KEY, [_seenDay, _seen, _pendingSec, _seenEpoch, _session, _nextEventId, _unsent, _unsentReason,
-            inf == null ? null : inf[:id], inf == null ? null : inf[:delta], inf == null ? null : inf[:reason]]);
+            inf == null ? null : inf[:id], inf == null ? null : inf[:delta], inf == null ? null : inf[:reason], _lastBadgeSeq]);
     }
 
     function headersFor(apiKey as String) as Dictionary {
@@ -441,6 +462,17 @@ module Sync {
             if (local != Ledger.balance()) {
                 Ledger.applyServerBalance(local);
             }
+        }
+        var cmd = data["badgeCommand"];
+        var ba = badgeToAward(_lastBadgeSeq, !_badgeSeen && _lastBadgeSeq == 0, cmd instanceof Dictionary ? cmd : null);
+        _badgeSeen = true;
+        if (ba[1] != _lastBadgeSeq) {
+            _lastBadgeSeq = ba[1] as Number;
+            var bid = ba[0];
+            if (bid instanceof String) {
+                Badges.demoAward(Badges.strToId(bid) as Symbol);
+            }
+            save();
         }
         var used = data["usedMinutesToday"];
         var day = data["usageDay"];

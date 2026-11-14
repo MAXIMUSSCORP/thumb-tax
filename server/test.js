@@ -116,10 +116,10 @@ test("LOCAL_NO_KEY=0 requires the key even on loopback", async () => {
   }
 });
 
-test("GET /state has all 13 keys", async () => {
+test("GET /state has all 14 keys", async () => {
   const s = await get();
   assert.deepStrictEqual(Object.keys(s).sort(), [
-    "activity", "balanceSec", "creditMinutes", "effectiveSec", "history", "pendingChargeSec", "source", "taxMinutes", "updatedAt", "usageDay", "usageEpoch", "usageUpdatedAt", "usedMinutesToday",
+    "activity", "badgeCommand", "balanceSec", "creditMinutes", "effectiveSec", "history", "pendingChargeSec", "source", "taxMinutes", "updatedAt", "usageDay", "usageEpoch", "usageUpdatedAt", "usedMinutesToday",
   ]);
   assert.strictEqual(s.usageDay, today());
 });
@@ -264,6 +264,54 @@ test("ledger: needs the key through the tunnel", async () => {
   assert.strictEqual((await get()).balanceSec, before);
   assert.strictEqual((await fetch(BASE + "/ledger", { method: "POST", headers: { ...R, "x-api-key": KEY }, body })).status, 200);
   await zero();
+});
+
+const BADGE_IDS = ["fc", "pw", "ls", "d1", "d3", "d5", "dk", "sm", "ds", "pa", "dw", "af", "wo", "r1", "r2", "r5", "ll", "dd", "fu", "sr"];
+
+test("badge: unknown id is 400 and changes nothing", async () => {
+  const before = (await get()).badgeCommand;
+  for (const body of [{ id: "perfectWeek" }, { id: "" }, { id: 5 }, {}]) {
+    const r = await post("/badge", body);
+    assert.strictEqual(r.status, 400);
+    assert.deepStrictEqual(await r.json(), { error: "unknown badge" });
+  }
+  assert.deepStrictEqual((await get()).badgeCommand, before);
+});
+
+test("badge: valid id is 200, seq increments, ledger untouched", async () => {
+  const h = (await get()).history.length;
+  const a = await (await post("/badge", { id: "pw" })).json();
+  assert.strictEqual(a.badgeCommand.id, "pw");
+  assert.ok(!Number.isNaN(Date.parse(a.badgeCommand.at)));
+  const b = await post("/badge", { id: "sr" });
+  assert.strictEqual(b.status, 200);
+  const bj = await b.json();
+  assert.strictEqual(bj.badgeCommand.seq, a.badgeCommand.seq + 1);
+  assert.strictEqual(bj.badgeCommand.id, "sr");
+  assert.strictEqual(bj.history.length, h);
+  assert.deepStrictEqual((await get()).badgeCommand, bj.badgeCommand);
+});
+
+test("badge: badgeCommand persists across restart", async () => {
+  const c = (await (await post("/badge", { id: "dk" })).json()).badgeCommand;
+  await stop();
+  await start();
+  assert.deepStrictEqual((await get()).badgeCommand, c);
+  const n = await (await post("/badge", { id: "fc" })).json();
+  assert.strictEqual(n.badgeCommand.seq, c.seq + 1);
+});
+
+test("badge: needs the key through the tunnel", async () => {
+  const R = { "cf-connecting-ip": "1.2.3.4", "content-type": "application/json" };
+  const before = (await get()).badgeCommand;
+  assert.strictEqual((await fetch(BASE + "/badge", { method: "POST", headers: R, body: JSON.stringify({ id: "pw" }) })).status, 401);
+  assert.deepStrictEqual((await get()).badgeCommand, before);
+});
+
+test("badge: panel HTML lists every badge id", async () => {
+  const html = await (await fetch(BASE + "/")).text();
+  for (const id of BADGE_IDS) assert.ok(html.includes(`"${id}"`), id);
+  assert.ok(html.includes("Unlock on watch"));
 });
 
 test("usage: increase, decrease, reset", async () => {

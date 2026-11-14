@@ -7,6 +7,7 @@
 //   POST /state   -> {activity, pendingChargeSec, source}, at least one of the first two
 //   POST /ledger  -> {deltaSec, reason, source, session?, eventId?, activity?, pendingChargeSec?}
 //   POST /usage   -> {usedMinutesToday 0..1440, day?, reset?}
+//   POST /badge   -> {id}, demo: asks the watch to unlock a badge (badgeCommand)
 //   GET  /        -> control panel
 //
 // Env: PORT (default 48217), API_KEY (default "group16"; header "x-api-key" or "?key=" on /state, /ledger and /usage;
@@ -53,6 +54,7 @@ let state = {
   history: [], // last 20, newest first
   ledgerSessions: {}, // {source: {session, lastEventId}}
   activity: null,
+  badgeCommand: null, // {seq, id, at}: last demo unlock request; the watch acts when seq grows
   usedMinutesToday: 0,
   usageDay: today(),
   usageUpdatedAt: null,
@@ -182,6 +184,23 @@ function applyUsage(body) {
   return { code: 200, body: view() };
 }
 
+// Same id strings and names as the watch's Badges.mc (STRS and DEFS), in the same order.
+const BADGE_IDS = {
+  fc: "First Clean Close", pw: "Perfect Week", ls: "Longest Streak", d1: "100 Clean Days", d3: "365 Clean Days",
+  d5: "500 Clean Days", dk: "1,000 Clean Days", sm: "Screen-Free Morning", ds: "Digital Sunset", pa: "Perfect Analog Week",
+  dw: "Deep Work 100", af: "Analog Fondo", wo: "Weekend Off-Grid", r1: "Time Reclaimed: 10 h", r2: "Time Reclaimed: 25 h",
+  r5: "Time Reclaimed: 50 h", ll: "Local Legend", dd: "Dopamine Detour", fu: "The Festive Unplug", sr: "Sunday Reset",
+};
+
+function applyBadge(body) {
+  const id = body.id;
+  if (typeof id !== "string" || !Object.hasOwn(BADGE_IDS, id)) return { code: 400, body: { error: "unknown badge" } };
+  state.badgeCommand = { seq: (state.badgeCommand ? state.badgeCommand.seq : 0) + 1, id, at: new Date().toISOString() };
+  save();
+  console.log(state.badgeCommand.at, "badge request", id, "#" + state.badgeCommand.seq);
+  return { code: 200, body: view() };
+}
+
 function send(res, code, body, type = "application/json") {
   if (code >= 400) console.warn(res.req.method, res.req.url, code, body && body.error);
   res.writeHead(code, {
@@ -277,6 +296,11 @@ async function handle(req, res) {
     return send(res, r.code, r.body);
   }
 
+  if (p === "/badge" && req.method === "POST") {
+    const r = applyBadge(await readBody(req));
+    return send(res, r.code, r.body);
+  }
+
   send(res, 404, { error: "not found" });
 }
 
@@ -321,9 +345,15 @@ const PANEL_HTML = `<!doctype html>
 <h1>Phone usage (stand-in for iOS)</h1>
 <div id="usage" class="label"></div>
 <p><button onclick="addUse(1)">+1</button><button onclick="addUse(5)">+5</button><button onclick="resetUse()">Reset day</button></p>
+<h1>Badges (demo)</h1>
+<p><select id="badge" style="font-size:16px;padding:8px"></select> <button onclick="unlock()">Unlock on watch</button></p>
+<div id="badgeLast" class="muted"></div>
+<p class="muted">The watch unlocks it within a few seconds and shows its new-badge screen.</p>
 <label>API key (only if the server has one)</label><input id="key" style="width:200px">
 <script>
 let debt=0,used=0;
+const BADGES=${JSON.stringify(BADGE_IDS)};
+for(const id in BADGES){const o=document.createElement('option');o.value=id;o.textContent=BADGES[id];badge.appendChild(o)}
 const keyEl=document.getElementById('key');keyEl.value=localStorage.getItem('wl_key')||'';
 keyEl.onchange=()=>{localStorage.setItem('wl_key',keyEl.value);refresh()};
 function hdr(){return {'Content-Type':'application/json','x-api-key':keyEl.value}}
@@ -340,6 +370,10 @@ async function refresh(){
   for(const h of s.history){const d=document.createElement('div');const x=Math.round(h.deltaSec/60*10)/10;
     d.textContent=new Date(h.t).toLocaleTimeString()+'  '+(x>0?'+':'')+x+' min  '+h.reason+'  ('+h.source+')';recent.appendChild(d)}
   if(!s.history.length)recent.textContent='Nothing yet';
+  const b=s.badgeCommand;badgeLast.textContent=b?'Last request: '+(BADGES[b.id]||b.id)+' #'+b.seq+' at '+new Date(b.at).toLocaleTimeString():'No request yet';
+}
+async function unlock(){
+  await fetch('/badge',{method:'POST',headers:hdr(),body:JSON.stringify({id:badge.value})});refresh()
 }
 async function bank(sec,reason){
   if(!sec)return;
