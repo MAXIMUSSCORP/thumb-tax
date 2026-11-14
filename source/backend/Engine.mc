@@ -33,6 +33,7 @@ module Engine {
         }
         Ledger.load();
         Records.load();
+        Badges.load();
         ScrollSource.start();
         Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE, Sensor.SENSOR_TEMPERATURE, Sensor.SENSOR_PULSE_OXIMETRY]);
         Sensor.enableSensorEvents(new Lang.Method(Engine, :onSensor));
@@ -51,6 +52,7 @@ module Engine {
         closeSession();
         Ledger.save();
         Records.save();
+        Badges.save();
         Sensor.enableSensorEvents(null);
         Sensor.setEnabledSensors([]);
     }
@@ -67,10 +69,12 @@ module Engine {
     }
 
     function tick() as Void {
+        var overBuzz = false;
+        var scrolling = ScrollSource.isScrolling();
         _hour = System.getClockTime().hour;
         var t = _temp;
         _inBed = t != null && t >= IN_BED_TEMP_C;
-        if (ScrollSource.isScrolling()) {
+        if (scrolling) {
             if (_sessionSec == 0) {
                 Records.openSession();
             }
@@ -87,19 +91,27 @@ module Engine {
                 _hrCount += 1;
             }
             if (Ledger.isOverdrawn()) {
-                vibrate();
+                overBuzz = true;
             }
             _sinceSave += 1;
             if (_sinceSave >= SAVE_EVERY_SEC) {
                 Ledger.save();
                 Records.save();
+                Badges.save();
                 _sinceSave = 0;
             }
         } else if (_sessionSec > 0) {
             closeSession();
             Ledger.save();
             Records.save();
+            Badges.save();
             _sinceSave = 0;
+        }
+        Badges.onTick(scrolling, Ledger.isOverdrawn(), ScrollSource.isOnline() || ScrollSource.manual() != null);
+        if (Badges.takeBuzz()) {
+            badgeVibrate();
+        } else if (overBuzz) {
+            vibrate();
         }
         var cb = _callback;
         if (cb != null) {
@@ -111,6 +123,7 @@ module Engine {
         Records.closeSession();
         if (_sessionSec > 0) {
             Ledger.closeScrollSession(_sessionSec, _sessionCharged, _sessionNight);
+            Badges.onScrollSessionEnd(_sessionSec);
         }
         _sessionSec = 0;
         _sessionCharged = 0;
@@ -127,6 +140,16 @@ module Engine {
         if (Attention has :vibrate) {
             _lastVibeMs = now;
             Attention.vibrate([new Attention.VibeProfile(100, 400)]);
+        }
+    }
+
+    function badgeVibrate() as Void {
+        if (Attention has :vibrate) {
+            _lastVibeMs = System.getTimer();
+            Attention.vibrate([
+                new Attention.VibeProfile(100, 150), new Attention.VibeProfile(0, 100),
+                new Attention.VibeProfile(100, 150), new Attention.VibeProfile(0, 100),
+                new Attention.VibeProfile(100, 150)]);
         }
     }
 
@@ -149,7 +172,9 @@ module Engine {
             :sessionAvgHr => _hrCount > 0 ? _hrSum / _hrCount : null,
             :hr => _hr,
             :tempC => _temp,
-            :stats => Ledger.stats()
+            :stats => Ledger.stats(),
+            :streak => Badges.streak(),
+            :unseenBadges => Badges.unseen().size()
         };
     }
 }

@@ -261,6 +261,7 @@ module Activities {
             _timer = new Timer.Timer();
             _timer.start(_cb.method(:onTick), 1000, true);
         }
+        Badges.onActivityStart(kind);
         return true;
     }
 
@@ -281,11 +282,18 @@ module Activities {
         }
         var n = info[:count] as Number;
         if (det == :walk) {
-            return Ledger.earn(:walkM, n) + Ledger.earn(:climbM, info[:climbM] as Number);
+            var walked = Ledger.earn(:walkM, n) + Ledger.earn(:climbM, info[:climbM] as Number);
+            if (walked > 0) {
+                Badges.onActivityCredited(kind, walked);
+            }
+            return walked;
         }
         var credited = Ledger.earn(kind, n);
         if (hrDrop && credited > 0) {
             credited += Ledger.bonus(pn(p, :hrDropBonusSec, 0).toNumber(), "heart rate fell");
+        }
+        if (credited > 0) {
+            Badges.onActivityCredited(kind, credited);
         }
         return credited;
     }
