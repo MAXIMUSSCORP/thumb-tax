@@ -7,7 +7,7 @@ Start it with `node server.js` (or `npm start`). Run the tests with `npm test`. 
 ## Environment variables
 
 - `PORT`: default 48217.
-- `API_KEY`: if set, /state and /usage need the header `x-api-key` or the query `?key=`.
+- `API_KEY`: /state and /usage need the header `x-api-key` or the query `?key=`. Default `group16`, the key the watch sends (`API_KEY` in the watch's Sync.mc). Set `API_KEY=` (empty) to turn the key off.
 - `DATA_FILE`: where state is saved, default `state.json` next to server.js. On Railway the default is `/data/state.json` when a volume is mounted at /data. On Railway the default is `/data/state.json` when a volume is mounted at /data.
 
 ## Contract v1
@@ -53,7 +53,7 @@ The server has no dependencies, so Railway builds it straight from package.json 
 1. Install the CLI: `npm i -g @railway/cli`.
 2. Run `railway login`.
 3. From the server/ folder, run `railway init`, then `railway up`.
-4. Set a key with `railway variables --set API_KEY=<random>`. Without it the server prints "WARNING: no API_KEY set on a public server" and anyone can change your minutes.
+4. Set the key with `railway variables --set API_KEY=group16` (the key the watch sends). Without the variable the server also defaults to `group16`; with `API_KEY` set to empty it prints "WARNING: no API_KEY set on a public server" and anyone can change your minutes.
 5. Run `railway domain` to get the public address.
 
 Clients use `https://<domain>` and send the header `x-api-key`. The health check is `/health` (configured in railway.json).

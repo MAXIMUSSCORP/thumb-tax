@@ -11,9 +11,11 @@ class ThumbTaxApp extends Application.AppBase {
 
     public function onStart(state as Dictionary?) as Void {
         Engine.start();
+        UiClock.start();
     }
 
     public function onStop(state as Dictionary?) as Void {
+        UiClock.stop();
         Engine.stop();
     }
 

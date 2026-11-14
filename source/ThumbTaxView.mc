@@ -30,7 +30,6 @@ class ThumbTaxView extends WatchUi.View {
     private var _page as Number = 0;
     private var _scroll as Float = 0.0;
     private var _anim as Timer.Timer or Null = null;
-    private var _poll as Timer.Timer or Null = null;
 
     public function initialize() {
         View.initialize();
@@ -38,18 +37,13 @@ class ThumbTaxView extends WatchUi.View {
 
     public function onShow() as Void {
         _cardio.load();
-        // The Engine owns the only sensor listener; read its latest sample once a second.
-        var t = new Timer.Timer();
-        t.start(method(:onPoll), 1000, true);
-        _poll = t;
+        // The Engine owns the only sensor listener; read its latest sample on the shared 1 Hz UI tick
+        // (a timer of our own plus the scroll animation would exceed the device's 3-timer limit).
+        UiClock.listen(self, method(:onPoll));
     }
 
     public function onHide() as Void {
-        var t = _poll;
-        if (t != null) {
-            t.stop();
-        }
-        _poll = null;
+        UiClock.release(self);
         stopAnim();
     }
 
@@ -161,6 +155,7 @@ class ThumbTaxView extends WatchUi.View {
             }
         }
         drawScrollbar(dc);
+        Notify.draw(dc);
     }
 
     private function drawPage(dc as Dc, p as Number, off as Number) as Void {
