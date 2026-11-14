@@ -116,10 +116,10 @@ test("LOCAL_NO_KEY=0 requires the key even on loopback", async () => {
   }
 });
 
-test("GET /state has all 12 keys", async () => {
+test("GET /state has all 13 keys", async () => {
   const s = await get();
   assert.deepStrictEqual(Object.keys(s).sort(), [
-    "activity", "balanceSec", "creditMinutes", "history", "pendingChargeSec", "source", "taxMinutes", "updatedAt", "usageDay", "usageEpoch", "usageUpdatedAt", "usedMinutesToday",
+    "activity", "balanceSec", "creditMinutes", "effectiveSec", "history", "pendingChargeSec", "source", "taxMinutes", "updatedAt", "usageDay", "usageEpoch", "usageUpdatedAt", "usedMinutesToday",
   ]);
   assert.strictEqual(s.usageDay, today());
 });
@@ -158,6 +158,22 @@ test("derived tax and credit include pendingChargeSec", async () => {
   assert.strictEqual(s.creditMinutes, 6); // floor(370/60)
   s = await (await post("/state", { pendingChargeSec: 0 })).json();
   assert.strictEqual(s.creditMinutes, 6);
+  await zero();
+});
+
+test("effectiveSec and clear debt: pending charges drain to zero", async () => {
+  await zero();
+  await led({ deltaSec: -300 });
+  let s = await (await post("/state", { pendingChargeSec: 120 })).json();
+  assert.strictEqual(s.effectiveSec, -420);
+  assert.strictEqual(s.taxMinutes, 7);
+  s = await (await led({ deltaSec: -s.effectiveSec, reason: "panel clear debt" })).json(); // +420
+  assert.strictEqual(s.balanceSec, 120);
+  assert.strictEqual(s.effectiveSec, 0);
+  s = await (await led({ deltaSec: -120, reason: "watch charge" })).json(); // pending drains into balance
+  s = await (await post("/state", { pendingChargeSec: 0 })).json();
+  assert.strictEqual(s.balanceSec, 0);
+  assert.strictEqual(s.effectiveSec, 0);
   await zero();
 });
 

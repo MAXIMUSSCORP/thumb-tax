@@ -1,6 +1,6 @@
 # Thumb Tax
 
-A Garmin watch app that turns phone scrolling into a screen-time bank: scroll and the watch charges you, move and it pays you back.
+A screen-time bank on your wrist. Phone minutes are charged to a balance, the watch verifies exercise, chores and calm time with its sensors, and verified time pays the balance back. An iPhone app blocks your chosen apps while you owe time.
 
 Built for the Tech Thursday x Garmin hackathon (Calgary, 2026-11-14). Prompt: "build something that makes your own health and wellness better."
 
@@ -8,35 +8,93 @@ Built for the Tech Thursday x Garmin hackathon (Calgary, 2026-11-14). Prompt: "b
 
 Doomscrolling costs sleep and focus, and it costs the most late at night, when one more swipe feels free. Nothing tells you the price while you are paying it. Thumb Tax shows the price on your wrist, live, and gives you a way to earn the time back.
 
+## Screenshots
+
+![Scroll meter in the Connect IQ simulator](docs/screenshots/watch-simulator.png)
+
+The watch's live scroll meter in the Connect IQ simulator (fenix 7 Pro): OVERDRAFT, x1 day rate, -1:42 min of sleep while scrolling, bank at -29 s, and the payoff suggestion.
+
+![Server control panel](docs/screenshots/control-panel.jpg)
+
+The server's control panel: -4 min of debt with apps blocked, the +/-5 and 15 minute buttons, Clear debt, the watch's suggestion and the recent transactions from the watch.
+
+iPhone screenshots (`docs/screenshots/iphone-blocked.png`) are to be added by the iOS developer.
+
+## Architecture
+
+Three parts share one bank. The server holds the balance. The watch and the panel change it with transactions. The iPhone reads it.
+
+```
+  iPhone (WatchLock)         Watch (Connect IQ)         Control panel
+  GET /state                 POST /ledger               POST /ledger
+  POST /usage                GET /state                 POST /usage
+       |                          |                          |
+       +---- HTTPS (Cloudflare tunnel, x-api-key header) ----+
+                                  |
+                   Server (laptop, Node, no dependencies)
+                   THE BANK: balanceSec, history, phone usage
+```
+
+| Part | What it does |
+|---|---|
+| Server (`server/server.js`) | Holds `balanceSec`. `taxMinutes` and `creditMinutes` are derived: the balance minus phone minutes not yet charged. Takes numbered transactions on `POST /ledger` (watch, panel), the iPhone's running total on `POST /usage`, and serves `GET /state`. Plain Node, no dependencies, behind a public HTTPS Cloudflare tunnel. Calls need the `x-api-key` header. Contract in `server/README.md` |
+| Watch app (`source/`, fenix 7 Pro) | Turns new phone minutes into charges: day x1, night x2, in bed x3. Verifies activities with sensors. Sends each charge or credit as a numbered transaction that the server applies once. Mirrors the server balance. Ranks payoff suggestions by time. Awards badges and draws trends. One Timer in `Engine.mc` drives the whole backend |
+| iPhone app (`ios/`, WatchLock, SwiftUI + Screen Time) | Reads `GET /state` every 3 s. Blocks the chosen apps while `taxMinutes` is above 0 and shows the watch's suggestion. Shows a green screen with the earned time when clear. "Scroll anyway" adds 5 minutes of use through `POST /usage` |
+| Control panel (served by the server at `/`) | Adds or removes minutes on the same balance, a phone-usage stand-in for demos, and a list of recent transactions |
+
+### Watch backend
+
+| File | Purpose |
+|---|---|
+| `Engine.mc` | The 1 Hz heartbeat and the only Timer. Reads sensors, charges, buzzes in overdraft, saves, drives Sync and Activities |
+| `Sync.mc` | Polls the server, turns new phone minutes into scroll seconds, keeps the outbox of numbered transactions (session plus event id), mirrors the server balance, builds the payoff suggestion |
+| `Ledger.mc` | The signed balance, multipliers, overdraft, daily stats, history |
+| `Catalog.mc` | The single list of 29 activity kinds, detectors, thresholds and rates |
+| `Activities.mc` | Table-driven detectors that verify and credit activities |
+| `Badges.mc` | Clean days, streaks, windows, monthly savings, badge awards |
+| `Records.mc` | Stored history behind the trend pages |
+| `*Test.mc` | Unit tests for activities, badges, ledger, records and sync |
+
+`source/screens/` holds the watch UI: hub menu, activity picker and session, scroll meter, scroll feed, badge views, alerts. `source/` holds the mascot, the trend pages and their chart primitives.
+
+### Data flow
+
+```
+phone minutes (server) --> Sync --> Engine (1 Hz) --> Ledger --> UI
+                                        |                ^
+                                        +--> Records ----+
+                                        +--> Badges -----+
+Activities (sensors) --> Ledger, Badges
+Ledger changes --> Sync outbox --> POST /ledger --> server balance --> Sync mirror
+```
+
+Sync polls the server every 4 s and converts new iPhone minutes into scroll seconds. Minutes counted but not yet charged are reported as `pendingChargeSec`, so the iPhone sees debt before the watch has finished charging. A charge or credit goes out as one transaction with a session and an event id. If a reply is lost the watch resends the same id and the server applies it once. After each reply the watch takes the server balance and adds back anything the server has not seen. State saves to on-watch storage every 30 s while charging and when a session ends.
+
 ## How it works: the bank
 
-There is one balance, measured in minutes of screen time. It can go negative.
+There is one balance, measured in time. It can go negative.
 
 | Event | Effect on balance |
 |---|---|
-| Scrolling in the day (06:00 to 22:00) | Charged 1x |
-| Scrolling at night (22:00 to 06:00) | Charged 2x (the sleep fee) |
-| Scrolling at night in bed (wrist temperature at or above 33.0 C, estimated) | Charged 3x |
-| Scrolling while the balance is negative (overdraft) | The watch buzzes, at most once every 10 s |
+| Phone use in the day (06:00 to 22:00) | Charged 1x |
+| Phone use at night (22:00 to 06:00) | Charged 2x (the sleep fee) |
+| Phone use at night in bed (wrist temperature at or above 33.0 C, estimated) | Charged 3x |
+| Phone use while the balance is negative (overdraft) | The watch buzzes, at most once every 10 s |
 | Verified exercise, chores, outdoor time or calm time | Credited as a "tax return" (see the activity tables) |
 
-Paying off debt and earning credit use the same path. A negative balance is debt that "punishments" (exercises) pay down. A positive balance is credit to scroll later. Walking is credited per kilometre and per metre climbed, and stairs per floor.
+Paying off debt and earning credit use the same path. A negative balance is debt that exercises pay down. A positive balance is credit to scroll later. Walking is credited per kilometre and per metre climbed, and stairs per floor.
 
 The last 20 balance changes are kept as a history. Daily totals (day scroll, night scroll, sleep fee, earned back) reset at local midnight.
 
-## How scrolling is detected
+### Payoff suggestions
 
-Two signals feed one yes/no answer.
+When you owe time, the watch ranks activities by how long each takes to clear the debt, using typical paces (estimated, not measured). Example: "14 min high knees or 14 min plank clears it. +10 min to scroll: 5 floors of stairs."
 
-1. Phone side. A web feed reports real scrolling to a small local server. The watch polls it every 2 s:
+## How phone use is detected
 
-   `GET http://127.0.0.1:8787/status` returns `{"scrolling": true}` or `{"scrolling": false}`
+The iPhone app reports usage. Its running total of minutes goes to `POST /usage`, the server keeps it per day, and the watch converts new minutes into charges. When the server cannot be reached the watch shows a sync status such as SYNC OFFLINE, SYNC 401 KEY or SYNC -1001 HTTPS, and nothing is charged for the gap.
 
-   A reading older than 6 s counts as offline, and offline time is never charged. The simulator reaches the server directly. A real watch sends the request through the paired phone.
-
-2. On wrist, on real hardware. The summary page compares the magnetometer field to a baseline (START re-baselines). A jump of more than 40 units suggests a phone, with its speaker and magnets, is close to the wrist. The accelerometer adds the wrist pose of holding a phone.
-
-The engine also accepts a manual scrolling override, used for demos.
+The on-wrist path is the idea for real hardware: the magnetometer field compared with a baseline (a jump of more than 40 units suggests a phone near the wrist) plus the accelerometer wrist pose of holding a phone. It needs a real watch and is not the path used in the simulator demo. The hub's Demo item can force scrolling on or off.
 
 ## Earning time back
 
@@ -131,7 +189,8 @@ A clean day is a day with no overdraft scrolling and at least 1 h of monitored w
 | The Festive Unplug | Dec 24 to Jan 1, each day at 30 min or less |
 | Sunday Reset | 4 phone-free Sunday mornings in a month (75% of wake to noon monitored and clean) |
 
-Earning a badge buzzes the watch with a triple pulse. The badges above are the ones the watch can verify from its own clock and sensors. Greyscale and notification badges live on the phone side.
+Earning a badge buzzes the watch with a triple pulse. The badges above are the ones the watch can verify from its own clock and sensors.
+
 
 ## The watch UI
 
@@ -144,103 +203,56 @@ The app opens on the thumb mascot, drawn from shapes so it fits the screen. Its 
 | Taxed | DAY TAX | Scrolling now, or the balance is negative in the day |
 | Sleep debt | SLEEP TAX | Balance is negative at night |
 
-The amount shows under the mascot, for example "+12 min" or "-4 min owed". UP and DOWN cycle the moods as a demo preview that holds for 10 s. START opens the sensor pages.
+The amount shows under the mascot, for example "+12 min" or "-4 min owed". START or MENU opens the hub:
 
-The sensor pages scroll with UP and DOWN:
-
-| Page | Content |
+| Hub item | Content |
 |---|---|
-| Live summary | Magnetometer gauge, PHONE? or NO PHONE status, balance, heart rate and temperature tiles. START re-baselines |
-| Scroll tax | Minutes scrolled and minutes taxed |
-| Sleep debt | Night scrolling and the sleep fee |
-| Cardio | Heart rate while scrolling against not scrolling |
-| Tax returns | Minutes earned back |
-| Pulse ox | Overnight SpO2 |
+| Earn time | The activity picker and live sessions |
+| Scroll meter | The live meter. In overdraft the whole screen inverts. Shows the rate, sleep lost while scrolling, the bank and the payoff suggestion |
+| Badges | Badge list and streak |
+| Trends | Week and today pages: scroll tax, sleep debt, cardio while scrolling, tax returns, pulse ox. START toggles WEEK and TODAY |
+| Demo | Force scrolling on or off |
 
-On the trend pages START toggles WEEK and TODAY. Trends count night as 20:00 to 08:00 for exposure, and taxed figures are the seconds the bank actually charged. All shown values are estimates.
-
-## Architecture
-
-`source/`
-
-| File | Purpose |
-|---|---|
-| `ThumbTaxApp.mc` | App entry, starts the engine |
-| `ThumbTaxDelegate.mc` | Button and swipe input |
-| `AvatarView.mc` | Home screen with the mascot, mood and amount |
-| `Avatar.mc` | Mascot drawing for the four moods |
-| `ThumbTaxView.mc` | Live summary page and the trend pages |
-| `Trends.mc` | Trend page layouts |
-| `Chart.mc` | Chart primitives |
-| `Icons.mc` | Sensor and page icons |
-| `CardioDay.mc` | Today's heart rate split by scrolling and not scrolling |
-
-`source/backend/`
-
-| File | Purpose |
-|---|---|
-| `Catalog.mc` | The single list of 29 activity kinds, detectors, thresholds and rates |
-| `Ledger.mc` | The signed balance, multipliers, overdraft, daily stats, history |
-| `Engine.mc` | 1 Hz heartbeat: reads sensors, charges scrolling, buzzes, saves |
-| `ScrollSource.mc` | Polls the phone feed and holds the manual override |
-| `Activities.mc` | Table-driven detectors that verify and credit activities |
-| `Badges.mc` | Clean days, streaks, windows, monthly savings, badge awards |
-| `Records.mc` | Stored history behind the trend pages |
-| `*Test.mc` | Unit tests for activities, badges, ledger and records |
-
-Data flow:
-
-```
-phone feed --> ScrollSource --> Engine (1 Hz) --> Ledger ----> UI
-                                   |                ^
-                                   +--> Records ----+
-                                   +--> Badges -----+
-Activities (sensors) --> Ledger, Badges
-```
-
-Engine reads heart rate, temperature and pulse ox, asks ScrollSource whether you are scrolling, charges the Ledger at the right multiplier, and feeds Records and Badges. Activities credits the Ledger when a session is verified and tells Badges. The UI reads `Engine.state()` and one change callback. State saves to on-watch storage every 30 s while scrolling and when a session ends.
-
-## UI and where the backend plugs in
-
-The app opens on the mascot. START opens the sensor screen; UP/DOWN scroll its pages; START on a trend page switches WEEK / TODAY.
-
-| File | What it is | Backend hook |
-|---|---|---|
-| `source/Avatar.mc` | Thumb mascot, four moods: `MOOD_REWARD`, `MOOD_CLEAR`, `MOOD_TAXED`, `MOOD_SLEEP_DEBT` | Call `Avatar.draw(dc, x, y, size, mood, tick)` with the mood the detector/ledger decides |
-| `source/AvatarView.mc` | Mood preview screen (placeholder amounts) | Replace `AMOUNTS` / `NOTES` with live ledger values |
-| `source/ThumbTaxView.mc` | Page 0: live phone-detection summary. Pages 1-5: trends | `PHONE_DELTA` is the magnetometer threshold; the real detector should replace the `phone` test in `drawSummary` |
-| `source/Ledger.mc` | All Thumb Tax records the trend pages read: day/night scroll minutes, minutes earned back, HR lift, overnight SpO2, today's sessions | **Every series is demo data (`DEMO = true`).** Replace the constants with stored records (e.g. `Application.Storage`) keeping the same shapes, then set `DEMO = false` |
-| `source/CardioDay.mc` | Today's heart rate from the watch's own history, split into scrolling vs not | Uses `Ledger.TODAY_SESSIONS`; real HR, demo sessions |
-| `source/Trends.mc`, `source/Chart.mc`, `source/Icons.mc` | Trend page layouts, chart primitives, sensor icons | None |
-
-Ledger shapes: week arrays have 7 entries, oldest first, last is today. Today-hourly arrays have 24 entries from midnight. `LAST_NIGHT_BINS` has 12 hourly entries from 20:00. `TODAY_SESSIONS` is a list of `[startMinute, endMinute]` since midnight. Night minutes are taxed at `NIGHT_RATE` (x2).
+Trends count night as 20:00 to 08:00 for exposure, and taxed figures are the seconds the bank actually charged. All shown values are estimates.
 
 ## Build and run
 
-Requirements: Connect IQ SDK 9.1.0, Java 17 or newer, and your own developer key.
+Requirements: Connect IQ SDK 9.1.0, Java 17 or newer, your own developer key, Node 18 or newer for the server, and Xcode on a Mac for the iPhone app.
 
-Target: fenix 7 Pro, API 5.2. The app is developed and demoed in the Connect IQ simulator.
+### Demo setup (three machines)
 
-```
-monkeyc -d fenix7pro -f monkey.jungle -o bin/ThumbTax.prg -y <developer_key> -w
-connectiq
-monkeydo bin/ThumbTax.prg fenix7pro
-```
+1. Server laptop. Start the server with the key set, then open the tunnel and share the printed https URL.
 
-Run `connectiq` in one terminal to open the simulator, then `monkeydo` in another.
+   ```
+   API_KEY=<api-key> node server/server.js
+   cloudflared tunnel --url http://localhost:48217
+   ```
 
-Unit tests:
+   In PowerShell set the key first with `$env:API_KEY="<api-key>"`. The control panel is at `http://localhost:48217/`. The tunnel URL changes every time the tunnel restarts.
+2. Presentation laptop. Put `<tunnel-url>` and `<api-key>` in `SERVER_BASE` and `API_KEY` in `source/backend/Sync.mc`, then build and run in the simulator.
+
+   ```
+   monkeyc -d fenix7pro -f monkey.jungle -o bin/ThumbTax.prg -y <developer_key> -w
+   connectiq
+   monkeydo bin/ThumbTax.prg fenix7pro
+   ```
+
+   Run `connectiq` in one terminal to open the simulator, then `monkeydo` in another. Target: fenix 7 Pro, API 5.2.
+3. Mac and iPhone. Copy `ios/WatchLock/Config.swift.example` to `Config.swift` and set `mode = .live`, `serverURL = "<tunnel-url>"` and `apiKey = "<api-key>"`. The modes `.locked` and `.unlocked` use dummy data and need no server. Build with Xcode (`ios/project.yml` describes the project) and run on the iPhone. Pick the apps to block with Screen Time and add a Home Screen shortcut that opens `thumbtax://open?app=Instagram`.
+
+### Tests
 
 ```
 monkeyc -d fenix7pro -f monkey.jungle -o bin/ThumbTax.prg -y <developer_key> -w --unit-test
 monkeydo bin/ThumbTax.prg fenix7pro /t     (Windows)
 monkeydo bin/ThumbTax.prg fenix7pro -t     (macOS and Linux)
+node server/test.js
 ```
 
-Phone side: start the local server on port 8787, then open the web feed and scroll it. The watch picks up `{"scrolling": true}` within 2 s and starts charging.
+On Windows use `/t` and relative paths for the watch tests.
 
 Sideloading: connect the watch over USB and copy `bin/ThumbTax.prg` to `GARMIN/APPS`. Magnetometer and wrist behavior are only meaningful on real hardware.
 
 ## Privacy
 
-No data leaves the watch except the local scroll signal. The watch reads `/status` and sends nothing back. Balance, history, records and badges stay in on-watch storage. All figures are estimates from wrist sensors. Thumb Tax is not a medical device and gives no diagnosis or medical advice.
+The watch sends balance changes and a short activity name to your own server, and the iPhone sends its usage minutes there. The server runs on your laptop and requires an API key. Nothing goes to a third-party service except the Cloudflare tunnel that carries the traffic. All figures are estimates from wrist sensors. Thumb Tax is not a medical device and gives no diagnosis or medical advice.

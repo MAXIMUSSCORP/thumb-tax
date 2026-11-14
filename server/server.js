@@ -92,6 +92,7 @@ function view() {
   const eff = state.balanceSec - state.pendingChargeSec;
   return {
     ...rest,
+    effectiveSec: eff, // balanceSec minus pendingChargeSec; clients use this, not their own math
     taxMinutes: Math.ceil(Math.max(0, -eff) / 60),
     creditMinutes: Math.floor(Math.max(0, eff) / 60),
     history: state.history.slice(0, 10),
@@ -328,10 +329,9 @@ keyEl.onchange=()=>{localStorage.setItem('wl_key',keyEl.value);refresh()};
 function hdr(){return {'Content-Type':'application/json','x-api-key':keyEl.value}}
 async function refresh(){
   const r=await fetch('/state',{headers:hdr()});if(!r.ok){num.textContent='–';label.textContent='Auth error: enter the API key';return}
-  const s=await r.json();const b=s.balanceSec;debt=Math.max(0,-b);used=s.usedMinutesToday;
-  const m=Math.round(Math.abs(b)/60);
-  num.textContent=b<0?'-'+m+' min debt':b>0?'+'+m+' min credit':'0 min';num.className='big '+(b<0?'due':'clear');
-  label.textContent=b<0?'apps blocked':'apps open';
+  const s=await r.json();const e=s.effectiveSec;debt=Math.max(0,-e);used=s.usedMinutesToday;
+  num.textContent=e<0?'-'+s.taxMinutes+' min debt':s.creditMinutes>0?'+'+s.creditMinutes+' min credit':'0 min';num.className='big '+(e<0?'due':'clear');
+  label.textContent=s.taxMinutes>0?'apps blocked':'apps open';
   split.textContent='Tax minutes: '+s.taxMinutes+' · Credit minutes: '+s.creditMinutes;
   clr.disabled=debt===0;
   usage.textContent=s.usedMinutesToday+' min used on '+s.usageDay;
