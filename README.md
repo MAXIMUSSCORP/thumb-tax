@@ -25,6 +25,21 @@ Habit loop, in bank language:
 
 All figures are estimates from wrist sensors. This is not a medical device and makes no diagnosis. No data leaves the watch.
 
+## UI and where the backend plugs in
+
+The app opens on the mascot. START opens the sensor screen; UP/DOWN scroll its pages; START on a trend page switches WEEK / TODAY.
+
+| File | What it is | Backend hook |
+|---|---|---|
+| `source/Avatar.mc` | Thumb mascot, four moods: `MOOD_REWARD`, `MOOD_CLEAR`, `MOOD_TAXED`, `MOOD_SLEEP_DEBT` | Call `Avatar.draw(dc, x, y, size, mood, tick)` with the mood the detector/ledger decides |
+| `source/AvatarView.mc` | Mood preview screen (placeholder amounts) | Replace `AMOUNTS` / `NOTES` with live ledger values |
+| `source/ThumbTaxView.mc` | Page 0: live phone-detection summary. Pages 1-5: trends | `PHONE_DELTA` is the magnetometer threshold; the real detector should replace the `phone` test in `drawSummary` |
+| `source/Ledger.mc` | All Thumb Tax records the trend pages read: day/night scroll minutes, minutes earned back, HR lift, overnight SpO2, today's sessions | **Every series is demo data (`DEMO = true`).** Replace the constants with stored records (e.g. `Application.Storage`) keeping the same shapes, then set `DEMO = false` |
+| `source/CardioDay.mc` | Today's heart rate from the watch's own history, split into scrolling vs not | Uses `Ledger.TODAY_SESSIONS`; real HR, demo sessions |
+| `source/Trends.mc`, `source/Chart.mc`, `source/Icons.mc` | Trend page layouts, chart primitives, sensor icons | None |
+
+Ledger shapes: week arrays have 7 entries, oldest first, last is today. Today-hourly arrays have 24 entries from midnight. `LAST_NIGHT_BINS` has 12 hourly entries from 20:00. `TODAY_SESSIONS` is a list of `[startMinute, endMinute]` since midnight. Night minutes are taxed at `NIGHT_RATE` (x2).
+
 ## Build and run
 
 Needs the Connect IQ SDK 9.1.0, Java 17 or newer, and your developer key.
