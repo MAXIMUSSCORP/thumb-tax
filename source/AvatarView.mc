@@ -1,5 +1,5 @@
 // Home screen for the mascot: the mood and amount follow the live time bank from Engine.state().
-// UP/DOWN (or swipe) cycles moods as a demo override that holds for 10 s; START opens the sensor test screen.
+// UP/DOWN (or swipe) cycles moods as a demo override that holds for 10 s; START or MENU opens the hub.
 import Toybox.Graphics;
 import Toybox.Lang;
 import Toybox.System;
@@ -172,9 +172,18 @@ class AvatarDelegate extends WatchUi.BehaviorDelegate {
         return true;
     }
 
+    // START or MENU (hold UP) opens the hub: earn time, scroll meter, trends, demo feed.
     public function onSelect() as Boolean {
-        var sensors = new $.ThumbTaxView();
-        WatchUi.pushView(sensors, new $.ThumbTaxDelegate(sensors), WatchUi.SLIDE_LEFT);
+        return openHub();
+    }
+
+    public function onMenu() as Boolean {
+        return openHub();
+    }
+
+    private function openHub() as Boolean {
+        var hub = new $.HubView();
+        WatchUi.pushView(hub, new $.HubDelegate(hub), WatchUi.SLIDE_LEFT);
         return true;
     }
 }
