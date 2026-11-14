@@ -46,7 +46,7 @@ module LedgerTest {
     (:test)
     function creditThenDebt(logger as Logger) as Boolean {
         Ledger.reset();
-        Ledger.earn(:pushups, 10);
+        Ledger.earn(:pushups, 30);
         Test.assertEqual(Ledger.balance(), 300);
         Test.assert(!Ledger.isOverdrawn());
         Ledger.chargeScroll(200, 12, false);
@@ -65,14 +65,14 @@ module LedgerTest {
     (:test)
     function earnRates(logger as Logger) as Boolean {
         Ledger.reset();
-        Test.assertEqual(Ledger.earn(:pushups, 10), 300);
-        Test.assertEqual(Ledger.earn(:floors, 3), 360);
+        Test.assertEqual(Ledger.earn(:pushups, 12), 120);
+        Test.assertEqual(Ledger.earn(:stairs, 3), 360);
         Test.assertEqual(Ledger.earn(:walkM, 1500), 900);
         Test.assertEqual(Ledger.earn(:climbM, 50), 600);
-        Test.assertEqual(Ledger.earn(:readingSec, 1200), 600);
-        Test.assertEqual(Ledger.balance(), 2760);
+        Test.assertEqual(Ledger.earn(:read, 1200), 600);
+        Test.assertEqual(Ledger.balance(), 2580);
         Test.assertEqual(Ledger.history().size(), 5);
-        Test.assertEqual(Ledger.stats()[:earnedSec], 2760);
+        Test.assertEqual(Ledger.stats()[:earnedSec], 2580);
         cleanup();
         return true;
     }
@@ -106,7 +106,7 @@ module LedgerTest {
     (:test)
     function resetZeroes(logger as Logger) as Boolean {
         Ledger.reset();
-        Ledger.earn(:floors, 2);
+        Ledger.earn(:stairs, 2);
         Ledger.chargeScroll(5, 23, true);
         Ledger.reset();
         Test.assertEqual(Ledger.balance(), 0);
@@ -114,6 +114,69 @@ module LedgerTest {
         Test.assertEqual(Ledger.stats()[:feeSec], 0);
         Test.assertEqual(Ledger.stats()[:entries], 0);
         cleanup();
+        return true;
+    }
+
+    (:test)
+    function dailyOnce(logger as Logger) as Boolean {
+        Ledger.reset();
+        Test.assertEqual(Ledger.earn(:sunlight, 300), 300);
+        Test.assert(Ledger.claimedToday(:sunlight));
+        Test.assertEqual(Ledger.earn(:sunlight, 300), 0);
+        Test.assert(!Ledger.claimedToday(:read));
+        Test.assertEqual(Ledger.balance(), 300);
+        cleanup();
+        return true;
+    }
+
+    (:test)
+    function capApplied(logger as Logger) as Boolean {
+        Ledger.reset();
+        Test.assertEqual(Ledger.earn(:coldShower, 300), 720);
+        Test.assertEqual(Ledger.earn(:sunlight, 1200), 600);
+        cleanup();
+        return true;
+    }
+
+    (:test)
+    function bonusAdds(logger as Logger) as Boolean {
+        Ledger.reset();
+        Test.assertEqual(Ledger.bonus(120, "calm bonus"), 120);
+        Test.assertEqual(Ledger.bonus(0, "none"), 0);
+        Test.assertEqual(Ledger.balance(), 120);
+        Test.assertEqual(Ledger.history().size(), 1);
+        cleanup();
+        return true;
+    }
+
+    (:test)
+    function unknownKindZero(logger as Logger) as Boolean {
+        Ledger.reset();
+        Test.assertEqual(Ledger.earn(:nope, 50), 0);
+        Test.assertEqual(Ledger.earn(:pushups, 0), 0);
+        Test.assertEqual(Ledger.history().size(), 0);
+        cleanup();
+        return true;
+    }
+
+    (:test)
+    function catalogIntegrity(logger as Logger) as Boolean {
+        var dets = [:reps, :tilt, :hold, :cadence, :calm, :active, :vigorous, :cold, :outdoors, :floors, :walk];
+        var keys = [:id, :label, :group, :detector, :unit, :rate, :verify, :cap, :minSec, :daily, :params];
+        var all = Catalog.all();
+        Test.assertEqual(all.size(), Catalog.ids().size());
+        for (var i = 0; i < all.size(); i++) {
+            var d = all[i];
+            for (var k = 0; k < keys.size(); k++) {
+                Test.assert(d.hasKey(keys[k]));
+            }
+            Test.assert((d[:rate] as Float) >= 0.0);
+            Test.assert(dets.indexOf(d[:detector]) >= 0);
+            Test.assert(Catalog.get(d[:id] as Symbol) == d);
+            for (var j = 0; j < i; j++) {
+                Test.assert(all[j][:id] != d[:id]);
+            }
+        }
         return true;
     }
 }

@@ -6,11 +6,8 @@ import Toybox.Time;
 import Toybox.Time.Gregorian;
 
 module Ledger {
-    const PUSHUP_SEC = 30;
-    const FLOOR_SEC = 120;
     const WALK_SEC_PER_KM = 600;
     const CLIMB_SEC_PER_M = 12;
-    const READING_RATIO = 0.5;
     const DAY_MULT = 1;
     const NIGHT_MULT = 2;
     const BED_MULT = 3;
@@ -26,6 +23,8 @@ module Ledger {
     var _fee as Number = 0;
     var _earned as Number = 0;
     var _entries as Number = 0;
+    // Labels (Strings: Storage cannot hold Symbols) of daily-only kinds already credited today.
+    var _claimed as Array<String> = [];
     // Each entry is [t, delta, reason]; plain arrays because Storage cannot hold Symbol keys.
     var _history as Array = [];
 
@@ -40,6 +39,7 @@ module Ledger {
         _fee = 0;
         _earned = 0;
         _entries = 0;
+        _claimed = [];
     }
 
     function rollDay() as Void {
@@ -74,7 +74,8 @@ module Ledger {
             _history = h as Array;
         }
         var d = s.getValue("lg_day") as Array?;
-        if (d != null && d.size() == 6 && d[0] == _dayKey) {
+        if (d != null && d.size() == 7 && d[0] == _dayKey) {
+            _claimed = d[6] as Array<String>;
             _scrollDay = d[1] as Number;
             _scrollNight = d[2] as Number;
             _fee = d[3] as Number;
@@ -88,7 +89,7 @@ module Ledger {
         var s = Application.Storage;
         s.setValue("lg_bal", _balance);
         s.setValue("lg_hist", _history);
-        s.setValue("lg_day", [_dayKey, _scrollDay, _scrollNight, _fee, _earned, _entries]);
+        s.setValue("lg_day", [_dayKey, _scrollDay, _scrollNight, _fee, _earned, _entries, _claimed]);
     }
 
     function balance() as Number {
@@ -148,30 +149,27 @@ module Ledger {
         return (x + 0.5).toNumber();
     }
 
-    function earn(kind as Symbol, amount as Numeric) as Number {
-        var sec = 0;
-        var why = "";
-        if (kind == :pushups) {
-            sec = amount.toNumber() * PUSHUP_SEC;
-            why = "push-ups x" + amount.toNumber();
-        } else if (kind == :floors) {
-            sec = amount.toNumber() * FLOOR_SEC;
-            why = "stairs " + amount.toNumber() + " floors";
-        } else if (kind == :walkM) {
-            sec = round(amount.toFloat() / 1000.0 * WALK_SEC_PER_KM);
-            why = "walk " + (amount.toFloat() / 1000.0).format("%.1f") + " km";
-        } else if (kind == :climbM) {
-            sec = round(amount.toFloat() * CLIMB_SEC_PER_M);
-            why = "climb " + amount.toNumber() + " m";
-        } else if (kind == :readingSec) {
-            sec = round(amount.toFloat() * READING_RATIO);
-            why = "reading " + (amount.toNumber() / 60) + " min";
-        } else {
-            return 0;
+    function describe(def as Dictionary, amount as Numeric) as String {
+        var label = def[:label] as String;
+        var unit = def[:unit] as Symbol;
+        if (unit == :rep) {
+            return label + " x" + amount.toNumber();
         }
-        if (sec <= 0) {
-            return 0;
+        if (unit == :floor) {
+            return label + " " + amount.toNumber() + " floors";
         }
+        var s = amount.toNumber();
+        return label + (s >= 60 ? " " + (s / 60) + " min" : " " + s + " sec");
+    }
+
+    function claimedToday(kind as Symbol) as Boolean {
+        load();
+        rollDay();
+        var def = Catalog.get(kind);
+        return def != null && _claimed.indexOf(def[:label] as String) >= 0;
+    }
+
+    function credit(sec as Number, why as String) as Number {
         load();
         rollDay();
         _balance += sec;
@@ -179,6 +177,45 @@ module Ledger {
         addHistory(sec, why);
         save();
         return sec;
+    }
+
+    function bonus(sec as Number, reason as String) as Number {
+        if (sec <= 0) {
+            return 0;
+        }
+        return credit(sec, reason);
+    }
+
+    function earn(kind as Symbol, amount as Numeric) as Number {
+        var sec = 0;
+        var why = "";
+        var def = Catalog.get(kind);
+        if (def != null) {
+            sec = (amount.toFloat() * (def[:rate] as Float)).toNumber();
+            var cap = def[:cap] as Number?;
+            if (cap != null && sec > cap) {
+                sec = cap;
+            }
+            if (sec <= 0 || ((def[:daily] as Boolean) && claimedToday(kind))) {
+                return 0;
+            }
+            why = describe(def, amount);
+            if (def[:daily] as Boolean) {
+                _claimed.add(def[:label] as String);
+            }
+        } else if (kind == :walkM) {
+            sec = round(amount.toFloat() / 1000.0 * WALK_SEC_PER_KM);
+            why = "walk " + (amount.toFloat() / 1000.0).format("%.1f") + " km";
+        } else if (kind == :climbM) {
+            sec = round(amount.toFloat() * CLIMB_SEC_PER_M);
+            why = "climb " + amount.toNumber() + " m";
+        } else {
+            return 0;
+        }
+        if (sec <= 0) {
+            return 0;
+        }
+        return credit(sec, why);
     }
 
     function stats() as Dictionary {
