@@ -73,10 +73,10 @@ test("state without key is 401", async () => {
   assert.strictEqual((await fetch(BASE + "/state?key=t")).status, 200);
 });
 
-test("GET /state has all 8 keys", async () => {
+test("GET /state has all 9 keys", async () => {
   const s = await get();
   assert.deepStrictEqual(Object.keys(s).sort(), [
-    "activity", "creditMinutes", "source", "taxMinutes", "updatedAt", "usageDay", "usageUpdatedAt", "usedMinutesToday",
+    "activity", "creditMinutes", "source", "taxMinutes", "updatedAt", "usageDay", "usageEpoch", "usageUpdatedAt", "usedMinutesToday",
   ]);
   assert.strictEqual(s.usageDay, today());
 });
@@ -179,4 +179,43 @@ test("usage: day must be a real date within one day of today", async () => {
   const r = await post("/usage", { usedMinutesToday: 5, day: shift(-1) });
   assert.ok(r.status === 200 || r.status === 409);
   if (r.status === 409) assert.strictEqual((await r.json()).error, "stale day");
+});
+
+test("usageEpoch: String, stable on increase, changed by reset, kept on new day", async () => {
+  const e0 = (await get()).usageEpoch;
+  assert.strictEqual(typeof e0, "string");
+  assert.ok(e0.length >= 6 && e0.length <= 12, e0);
+  await post("/usage", { usedMinutesToday: 0, day: shift(1), reset: true });
+  const e1 = (await get()).usageEpoch;
+  assert.notStrictEqual(e1, e0);
+  const r = await post("/usage", { usedMinutesToday: 9, day: shift(1) });
+  assert.strictEqual((await r.json()).usageEpoch, e1);
+  assert.strictEqual((await (await post("/state", { taxMinutes: 1 })).json()).usageEpoch, e1);
+  assert.strictEqual((await get()).usageEpoch, e1);
+});
+
+test("usageEpoch: survives restart, differs for a fresh DATA_FILE", async () => {
+  const e = (await get()).usageEpoch;
+  await stop();
+  await start();
+  assert.strictEqual((await get()).usageEpoch, e);
+  await stop();
+  fs.rmSync(DATA, { force: true });
+  await start();
+  const f = (await get()).usageEpoch;
+  assert.strictEqual(typeof f, "string");
+  assert.notStrictEqual(f, e);
+});
+
+test("usageEpoch: added when saved state lacks it", async () => {
+  await stop();
+  const s = JSON.parse(fs.readFileSync(DATA, "utf8"));
+  delete s.usageEpoch;
+  fs.writeFileSync(DATA, JSON.stringify(s));
+  await start();
+  const e = (await get()).usageEpoch;
+  assert.strictEqual(typeof e, "string");
+  await stop();
+  await start();
+  assert.strictEqual((await get()).usageEpoch, e);
 });

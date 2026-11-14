@@ -35,7 +35,10 @@ function nearToday(day) {
   return ok.includes(day);
 }
 
+const newEpoch = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
 let state = {
+  usageEpoch: newEpoch(), // changes only on reset:true; tells the watch to rebaseline
   taxMinutes: 0,
   creditMinutes: 0,
   activity: null,
@@ -62,6 +65,8 @@ function save() {
     console.error("save failed, serving from memory:", e.message);
   }
 }
+
+save(); // persist a freshly generated usageEpoch
 
 function roll() {
   const t = today();
@@ -106,6 +111,7 @@ function applyUsage(body) {
   const conflict = (error) => ({ code: 409, body: { error, usageDay: state.usageDay, usedMinutesToday: state.usedMinutesToday } });
   if (day < state.usageDay) return conflict("stale day");
   if (day === state.usageDay && used < state.usedMinutesToday && body.reset !== true) return conflict("decrease");
+  if (body.reset === true) state.usageEpoch = newEpoch();
   state.usageDay = day;
   state.usedMinutesToday = used;
   state.usageUpdatedAt = new Date().toISOString();

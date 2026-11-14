@@ -4,9 +4,27 @@ import Toybox.Test;
 
 module SyncTest {
     function delta(sd as String?, s as Number, d as String, u as Number, tax as Number, ns as Number) as Void {
-        var r = Sync.usageDelta(sd, s, d, u);
+        epochDelta(sd, s, null, d, u, null, tax, ns);
+    }
+
+    function epochDelta(sd as String?, s as Number, se as String?, d as String, u as Number, e as String?, tax as Number, ns as Number) as Void {
+        var r = Sync.usageDelta(sd, s, se, d, u, e);
         Test.assertEqual(r[0], tax);
         Test.assertEqual(r[1], ns);
+    }
+
+    (:test)
+    function usageEpochCases(logger as Logger) as Boolean {
+        epochDelta("d", 40, "a", "d", 3, "b", 0, 3);
+        epochDelta("d", 3, "b", "d", 7, "b", 4, 7);
+        epochDelta("d", 40, "b", "d", 3, "b", 0, 40);
+        epochDelta("d", 40, null, "d", 3, "b", 0, 40);
+        epochDelta("d", 40, "a", "d", 3, null, 0, 40);
+        epochDelta("d", 40, "a", "d", 43, null, 3, 43);
+        epochDelta(null, 0, "a", "d", 50, "b", 0, 50);
+        epochDelta("d1", 200, "a", "d2", 4, "a", 4, 4);
+        epochDelta("d1", 200, "a", "d2", 4, "b", 0, 4);
+        return true;
     }
 
     (:test)

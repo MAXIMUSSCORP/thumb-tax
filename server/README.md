@@ -15,12 +15,14 @@ Start it with `node server.js` (or `npm start`). Run the tests with `npm test`. 
 | Method and path | Body | Result |
 | --- | --- | --- |
 | GET /health | none | 200 `{"ok":true}` |
-| GET /state | none | 200 taxMinutes, creditMinutes, activity, usedMinutesToday, usageDay, usageUpdatedAt, source, updatedAt |
+| GET /state | none | 200 taxMinutes, creditMinutes, activity, usedMinutesToday, usageDay, usageEpoch, usageUpdatedAt, source, updatedAt |
 | POST /state | taxMinutes, creditMinutes, activity (at least one), source | 200 full state, 400 if none given |
 | POST /usage | usedMinutesToday 0..1440, optional day YYYY-MM-DD, optional reset | 200 full state, 400 bad input, 409 stale day or decrease |
 | OPTIONS any | none | 204 with CORS headers |
 
 Usage rolls to zero when the server's local date passes usageDay. A lower value on the same day is refused unless reset is true.
+
+usageEpoch is a String ID generated on first start and on every accepted reset:true (not on a new day); when it changes the watch rebaselines its usage counter instead of waiting to pass its old high-water mark.
 
 ## curl.exe examples (PowerShell)
 

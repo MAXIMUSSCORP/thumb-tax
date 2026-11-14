@@ -26,6 +26,7 @@ module Sync {
     var _timer as Timer.Timer? = null;
     var _seenDay as String? = null;
     var _seen as Number = 0;
+    var _seenEpoch as String? = null;
     var _pendingSec as Number = 0;
     var _manual as Boolean? = null;
     var _lastOkMs as Number = -1;
@@ -40,8 +41,8 @@ module Sync {
     var _lastWasPost as Boolean = false;
     var _sending as String = "";
 
-    function usageDelta(seenDay as String?, seen as Number, day as String, used as Number) as Array<Number> {
-        if (seenDay == null) {
+    function usageDelta(seenDay as String?, seen as Number, seenEpoch as String?, day as String, used as Number, epoch as String?) as Array<Number> {
+        if (seenDay == null || (epoch != null && seenEpoch != null && !epoch.equals(seenEpoch))) {
             return [0, used];
         }
         var sameDay = day.equals(seenDay);
@@ -127,6 +128,8 @@ module Sync {
                 _seenDay = d;
                 _seen = s;
                 _pendingSec = p;
+                var e = v.size() >= 4 ? v[3] : null;
+                _seenEpoch = e instanceof String ? e : null;
             }
         }
         var t = new Timer.Timer();
@@ -146,7 +149,7 @@ module Sync {
     }
 
     function save() as Void {
-        Application.Storage.setValue(SYNC_KEY, [_seenDay, _seen, _pendingSec]);
+        Application.Storage.setValue(SYNC_KEY, [_seenDay, _seen, _pendingSec, _seenEpoch]);
     }
 
     function headers() as Dictionary {
@@ -207,10 +210,16 @@ module Sync {
         var used = data["usedMinutesToday"];
         var day = data["usageDay"];
         if (used instanceof Number && day instanceof String) {
-            var r = usageDelta(_seenDay, _seen, day, used);
+            var ep = data["usageEpoch"];
+            var epoch = ep instanceof String ? ep : null;
+            var r = usageDelta(_seenDay, _seen, _seenEpoch, day, used, epoch);
             var sd = _seenDay;
-            if (sd == null || !day.equals(sd) || used != _seen) {
+            var se = _seenEpoch;
+            if (sd == null || !day.equals(sd) || used != _seen || (epoch != null && !epoch.equals(se))) {
                 _seenDay = day;
+                if (epoch != null) {
+                    _seenEpoch = epoch;
+                }
                 _seen = r[1];
                 _pendingSec += r[0] * 60;
                 save();
