@@ -32,6 +32,8 @@ targets:
         # Hackathon convenience: allows plain http:// servers on your LAN.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Thumb Tax reads your tax minutes from the laptop server on this Wi-Fi.
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

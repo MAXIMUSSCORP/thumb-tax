@@ -5,6 +5,8 @@ struct WatchState: Codable, Equatable {
     var taxMinutes: Int
     /// The activity the watch assigned, if any.
     var activity: String?
+    /// Earned scroll time in minutes (shown when taxMinutes is 0).
+    var creditMinutes: Int?
     var source: String?
     var updatedAt: String?
 }
@@ -31,7 +33,7 @@ enum WatchLockAPI {
             return WatchState(taxMinutes: Config.testTaxMinutes, activity: Config.testActivity, source: "test")
         case .unlocked:
             try? await Task.sleep(for: .milliseconds(400))
-            return WatchState(taxMinutes: 0, activity: nil, source: "test")
+            return WatchState(taxMinutes: 0, activity: nil, creditMinutes: Config.testCreditMinutes, source: "test")
         case .live:
             return try await fetchFromServer()
         }

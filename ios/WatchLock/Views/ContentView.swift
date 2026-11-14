@@ -60,6 +60,7 @@ struct ContentView: View {
                 header
                 numberBlock
                 if isBlocked { activityCard }
+                if state != nil && isClear { creditCard }
                 if case .failed(let message) = phase {
                     Text(message)
                         .font(.footnote)
@@ -173,6 +174,23 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.18)))
+    }
+
+    /// Green screen: the scroll time the watch says you've earned.
+    private var creditCard: some View {
+        let credit = max(0, state?.creditMinutes ?? 0)
+        return VStack(spacing: 6) {
+            Label("Earned scroll time", systemImage: "timer")
+                .font(.subheadline.weight(.semibold))
+                .opacity(0.85)
+            Text(credit == 1 ? "1 minute" : "\(credit) minutes")
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+        }
+        .frame(maxWidth: .infinity)
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.18)))
     }

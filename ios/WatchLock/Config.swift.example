@@ -19,8 +19,12 @@ enum Config {
     static let testTaxMinutes = 12
     static let testActivity = "Walk 500 steps"
 
-    /// The tax-minutes server. Simulator on the same Mac as the server: "http://localhost:3000".
-    static let serverURL = "http://localhost:3000"
+    /// Dummy earned scroll time used by .unlocked
+    static let testCreditMinutes = 15
+
+    /// The tax-minutes server on the laptop (same Wi-Fi). Use the 172.17.x address the server
+    /// prints at startup, not 172.24.x. Example: "http://172.17.0.5:48217"
+    static let serverURL = "http://LAPTOP-IP:48217"
 
     /// Must match the server's API_KEY. Leave empty if the server has none.
     static let apiKey = ""
