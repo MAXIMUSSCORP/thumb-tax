@@ -1,26 +1,47 @@
-// WatchLock MVP server — zero dependencies, Node 18+.
-// Stores the tax minutes the watch reports and serves them to the iOS app.
-// 0 tax minutes = guarded apps can open. Anything above 0 = blocked.
+// WatchLock server, zero dependencies, Node 18+. Contract v1.
+// Stores tax minutes (watch), credit minutes (watch) and phone usage (iOS or panel).
 //
-//   GET  /state   -> {taxMinutes, source, updatedAt}     (iOS app reads this)
-//   POST /state   -> body {"taxMinutes": 12, "activity": "Walk 10 min"}  (watch writes this; both optional)
-//   GET  /        -> control panel (stand-in for the watch while testing)
-//   GET  /health
+//   GET  /health  -> {ok:true}
+//   GET  /state   -> full state
+//   POST /state   -> {taxMinutes, creditMinutes, activity, source}, at least one of the first three
+//   POST /usage   -> {usedMinutesToday 0..1440, day?, reset?}
+//   GET  /        -> control panel
 //
-// Env: PORT (default 3000), API_KEY (optional; if set, required as header
-// "x-api-key" or query "?key=" on every /state call).
+// Env: PORT (default 48217), API_KEY (optional; header "x-api-key" or "?key=" on /state and /usage),
+// DATA_FILE (default ./state.json).
 
 const http = require("http");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 48217;
 const API_KEY = process.env.API_KEY || "";
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, "state.json");
 
+const pad = (n) => String(n).padStart(2, "0");
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Real calendar date that is yesterday, today or tomorrow locally (phone clocks drift across midnight).
+function nearToday(day) {
+  const ok = [-1, 0, 1].map((o) => {
+    const d = new Date();
+    d.setDate(d.getDate() + o);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  });
+  return ok.includes(day);
+}
+
 let state = {
   taxMinutes: 0,
+  creditMinutes: 0,
   activity: null,
+  usedMinutesToday: 0,
+  usageDay: today(),
+  usageUpdatedAt: null,
   source: "default",
   updatedAt: new Date().toISOString(),
 };
@@ -28,32 +49,80 @@ let state = {
 try {
   const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
   if (typeof saved.taxMinutes === "number") state = { ...state, ...saved };
-} catch (_) {
-  /* first run */
+} catch (e) {
+  if (e.code !== "ENOENT") console.error("could not load", DATA_FILE, "starting from defaults:", e.message);
 }
 
+// Atomic write; on failure (OneDrive EBUSY/EPERM) keep serving from memory.
 function save() {
-  fs.writeFile(DATA_FILE, JSON.stringify(state), () => {});
+  try {
+    fs.writeFileSync(DATA_FILE + ".tmp", JSON.stringify(state));
+    fs.renameSync(DATA_FILE + ".tmp", DATA_FILE);
+  } catch (e) {
+    console.error("save failed, serving from memory:", e.message);
+  }
 }
 
-function applyUpdate(body, source) {
-  const value = body.taxMinutes;
-  const n = Number(value);
-  const hasMinutes = !(value === undefined || value === null || value === "" || isNaN(n));
+function roll() {
+  const t = today();
+  if (t > state.usageDay) {
+    state.usedMinutesToday = 0;
+    state.usageDay = t;
+    save();
+  }
+}
+
+// Returns a number >= 0 (rounded), or null if absent or not numeric.
+function num(v) {
+  if (v === undefined || v === null || v === "" || typeof v === "boolean") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
+}
+
+function applyUpdate(body) {
+  const tax = num(body.taxMinutes);
+  const credit = num(body.creditMinutes);
   const hasActivity = typeof body.activity === "string" || body.activity === null;
-  if (!hasMinutes && !hasActivity) return null;
-  if (hasMinutes) state.taxMinutes = Math.max(0, Math.round(n));
-  if (hasActivity) state.activity = body.activity ? String(body.activity).slice(0, 120) : null;
-  state.source = source || "unknown";
+  if (tax === null && credit === null && !hasActivity) return null;
+  if (tax !== null) state.taxMinutes = tax;
+  if (credit !== null) state.creditMinutes = credit;
+  if (hasActivity) state.activity = body.activity ? body.activity.slice(0, 120) : null;
+  state.source = typeof body.source === "string" && body.source ? body.source : "watch";
   state.updatedAt = new Date().toISOString();
   save();
-  console.log(state.updatedAt, "taxMinutes =", state.taxMinutes, "activity =", state.activity, "from", state.source);
+  console.log(state.updatedAt, "tax =", state.taxMinutes, "credit =", state.creditMinutes, "activity =", state.activity, "from", state.source);
   return state;
 }
 
+function applyUsage(body) {
+  roll();
+  const v = body.usedMinutesToday;
+  const n = typeof v === "number" || (typeof v === "string" && v.trim() !== "") ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n < 0 || n > 1440) return { code: 400, body: { error: "usedMinutesToday must be a number 0..1440" } };
+  const day = body.day === undefined || body.day === null ? today() : body.day;
+  if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return { code: 400, body: { error: "day must be YYYY-MM-DD" } };
+  if (!nearToday(day)) return { code: 400, body: { error: "bad day" } };
+  const used = Math.round(n);
+  const conflict = (error) => ({ code: 409, body: { error, usageDay: state.usageDay, usedMinutesToday: state.usedMinutesToday } });
+  if (day < state.usageDay) return conflict("stale day");
+  if (day === state.usageDay && used < state.usedMinutesToday && body.reset !== true) return conflict("decrease");
+  state.usageDay = day;
+  state.usedMinutesToday = used;
+  state.usageUpdatedAt = new Date().toISOString();
+  save();
+  return { code: 200, body: state };
+}
+
 function send(res, code, body, type = "application/json") {
-  res.writeHead(code, { "Content-Type": type, "Cache-Control": "no-store" });
-  res.end(type === "application/json" ? JSON.stringify(body) : body);
+  if (code >= 400) console.warn(res.req.method, res.req.url, code, body && body.error);
+  res.writeHead(code, {
+    "Content-Type": type,
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "content-type,x-api-key",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+  });
+  res.end(code === 204 ? undefined : type === "application/json" ? JSON.stringify(body) : body);
 }
 
 function authorized(req, url) {
@@ -62,45 +131,80 @@ function authorized(req, url) {
 }
 
 function readBody(req) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let raw = "";
+    let big = false;
+    req.on("error", reject);
     req.on("data", (c) => {
+      if (big) return;
       raw += c;
-      if (raw.length > 1e5) req.destroy();
+      if (raw.length > 1e5) {
+        big = true;
+        raw = "";
+        reject(Object.assign(new Error("body too large"), { code: 413 }));
+      }
     });
     req.on("end", () => {
+      if (big) return;
       if (!raw) return resolve({});
       try {
-        resolve(JSON.parse(raw));
+        const j = JSON.parse(raw);
+        resolve(j && typeof j === "object" ? j : {});
       } catch (_) {
+        console.warn("invalid JSON body, parsing as form data");
         resolve(Object.fromEntries(new URLSearchParams(raw))); // form-encoded fallback
       }
     });
   });
 }
 
+process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
+process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
+
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  try {
+    await handle(req, res);
+  } catch (e) {
+    if (e && e.code === 413) return send(res, 413, { error: "body too large" });
+    console.error("handler error:", e);
+    if (!res.headersSent) send(res, 500, { error: "internal" });
+    else res.end();
+  }
+});
+
+async function handle(req, res) {
+  const url = new URL(req.url, "http://localhost");
   const p = url.pathname.replace(/\/+$/, "") || "/";
 
+  if (req.method === "OPTIONS") return send(res, 204);
   if (p === "/health") return send(res, 200, { ok: true });
   if (p === "/" && req.method === "GET") return send(res, 200, PANEL_HTML, "text/html; charset=utf-8");
 
   if (!authorized(req, url)) return send(res, 401, { error: "bad or missing API key" });
 
-  if (p === "/state" && req.method === "GET") return send(res, 200, state);
+  if (p === "/state" && req.method === "GET") {
+    roll();
+    return send(res, 200, state);
+  }
   if (p === "/state" && req.method === "POST") {
-    const body = await readBody(req);
-    const result = applyUpdate(body, body.source || "watch");
-    if (!result) return send(res, 400, { error: 'send {"taxMinutes": <number>} and/or {"activity": "<text>"}' });
+    const result = applyUpdate(await readBody(req));
+    if (!result) return send(res, 400, { error: "send taxMinutes, creditMinutes and/or activity" });
     return send(res, 200, result);
+  }
+  if (p === "/usage" && req.method === "POST") {
+    const r = applyUsage(await readBody(req));
+    return send(res, r.code, r.body);
   }
 
   send(res, 404, { error: "not found" });
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`WatchLock server on :${PORT}${API_KEY ? " (API key required)" : ""}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`http://127.0.0.1:${PORT}  (watch simulator)`);
+  for (const list of Object.values(os.networkInterfaces()))
+    for (const a of list || [])
+      if (a.family === "IPv4" && !a.internal) console.log(`http://${a.address}:${PORT}  (iPhone on the same Wi-Fi)`);
+  console.log(API_KEY ? "API key required (x-api-key header or ?key=)" : "No API key required");
 });
 
 const PANEL_HTML = `<!doctype html>
@@ -123,11 +227,16 @@ const PANEL_HTML = `<!doctype html>
 <div id="label" class="label"></div>
 <div id="meta" class="muted"></div>
 <p><button onclick="setTax(cur-1)">−1</button><button onclick="setTax(cur+1)">+1</button><button onclick="setTax(cur+5)">+5</button><button onclick="setTax(cur+15)">+15</button><button onclick="setTax(0)">Set 0</button></p>
+<p class="muted">The watch overwrites these within 15 s when it is running.</p>
+<div id="credit" class="muted"></div>
 <label>Set tax minutes</label><input id="val" type="number" min="0"> <button onclick="setTax(Number(val.value))">Set</button>
 <label>Activity suggestion (optional, shown on the phone's blocked screen)</label><input id="act" style="width:240px"> <button onclick="setAct(act.value)">Send</button> <button onclick="setAct(null)">Clear</button>
+<h1>Phone usage (stand-in for iOS)</h1>
+<div id="usage" class="label"></div>
+<p><button onclick="addUse(1)">+1</button><button onclick="addUse(5)">+5</button><button onclick="resetUse()">Reset day</button></p>
 <label>API key (only if the server has one)</label><input id="key" style="width:200px">
 <script>
-let cur=0;
+let cur=0,used=0;
 const keyEl=document.getElementById('key');keyEl.value=localStorage.getItem('wl_key')||'';
 keyEl.onchange=()=>{localStorage.setItem('wl_key',keyEl.value);refresh()};
 function hdr(){return {'Content-Type':'application/json','x-api-key':keyEl.value}}
@@ -136,6 +245,8 @@ async function refresh(){
   const s=await r.json();cur=s.taxMinutes;
   num.textContent=s.taxMinutes;num.className='big '+(s.taxMinutes>0?'due':'clear');
   label.textContent=s.taxMinutes>0?'tax minutes left, apps blocked':'tax minutes, apps open';
+  credit.textContent='Credit minutes: '+s.creditMinutes;used=s.usedMinutesToday;
+  usage.textContent=s.usedMinutesToday+' min used on '+s.usageDay;
   meta.textContent=(s.activity?'Activity: '+s.activity+' · ':'')+'from '+s.source+' · '+new Date(s.updatedAt).toLocaleTimeString();
 }
 async function setTax(n){
@@ -143,6 +254,12 @@ async function setTax(n){
 }
 async function setAct(a){
   await fetch('/state',{method:'POST',headers:hdr(),body:JSON.stringify({activity:a,source:'panel'})});refresh()
+}
+async function addUse(n){
+  await fetch('/usage',{method:'POST',headers:hdr(),body:JSON.stringify({usedMinutesToday:used+n})});refresh()
+}
+async function resetUse(){
+  await fetch('/usage',{method:'POST',headers:hdr(),body:JSON.stringify({usedMinutesToday:0,reset:true})});refresh()
 }
 refresh();setInterval(refresh,2000);
 </script></body></html>`;

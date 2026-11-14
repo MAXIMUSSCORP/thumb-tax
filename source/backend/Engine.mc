@@ -34,7 +34,7 @@ module Engine {
         Ledger.load();
         Records.load();
         Badges.load();
-        ScrollSource.start();
+        Sync.start();
         Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE, Sensor.SENSOR_TEMPERATURE, Sensor.SENSOR_PULSE_OXIMETRY]);
         Sensor.enableSensorEvents(new Lang.Method(Engine, :onSensor));
         var t = new Timer.Timer();
@@ -48,9 +48,10 @@ module Engine {
             t.stop();
         }
         _timer = null;
-        ScrollSource.stop();
+        Sync.stop();
         closeSession();
         Ledger.save();
+        Sync.save();
         Records.save();
         Badges.save();
         Sensor.enableSensorEvents(null);
@@ -68,9 +69,17 @@ module Engine {
         return _info;
     }
 
+    function hour() as Number {
+        return System.getClockTime().hour;
+    }
+
+    function inBed() as Boolean {
+        return _inBed;
+    }
+
     function tick() as Void {
         var overBuzz = false;
-        var scrolling = ScrollSource.isScrolling();
+        var scrolling = Sync.takeSecond();
         _hour = System.getClockTime().hour;
         var t = _temp;
         _inBed = t != null && t >= IN_BED_TEMP_C;
@@ -96,6 +105,7 @@ module Engine {
             _sinceSave += 1;
             if (_sinceSave >= SAVE_EVERY_SEC) {
                 Ledger.save();
+                Sync.save();
                 Records.save();
                 Badges.save();
                 _sinceSave = 0;
@@ -103,11 +113,12 @@ module Engine {
         } else if (_sessionSec > 0) {
             closeSession();
             Ledger.save();
+            Sync.save();
             Records.save();
             Badges.save();
             _sinceSave = 0;
         }
-        Badges.onTick(scrolling, Ledger.isOverdrawn(), ScrollSource.isOnline() || ScrollSource.manual() != null);
+        Badges.onTick(scrolling, Ledger.isOverdrawn(), Sync.isOnline() || Sync.manual() != null);
         if (Badges.takeBuzz()) {
             badgeVibrate();
         } else if (overBuzz) {
@@ -158,12 +169,21 @@ module Engine {
     }
 
     function state() as Dictionary {
+        var eff = Sync.effBalance(Ledger.balance(), Sync.pendingSec(), Ledger.multiplier(_hour, _inBed));
         return {
             :balanceSec => Ledger.balance(),
+            :debtMin => eff < 0 ? (-eff + 59) / 60 : 0,
+            :creditMin => eff > 0 ? eff / 60 : 0,
+            :pendingSec => Sync.pendingSec(),
+            :suggestion => Sync.suggestion(eff < 0 ? -eff : 0),
+            :syncCode => Sync.lastError(),
+            :syncFails => Sync.fails(),
+            :syncErr => Sync.statusText(),
+            :lastSyncAgoSec => Sync.lastSyncAgoSec(),
             :overdrawn => Ledger.isOverdrawn(),
-            :scrolling => ScrollSource.isScrolling(),
-            :online => ScrollSource.isOnline(),
-            :manual => ScrollSource.manual(),
+            :scrolling => Sync.isScrolling(),
+            :online => Sync.isOnline(),
+            :manual => Sync.manual(),
             :night => Ledger.isNight(_hour),
             :inBed => _inBed,
             :multiplier => Ledger.multiplier(_hour, _inBed),
