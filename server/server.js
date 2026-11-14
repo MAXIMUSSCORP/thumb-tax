@@ -7,7 +7,8 @@
 //   POST /usage   -> {usedMinutesToday 0..1440, day?, reset?}
 //   GET  /        -> control panel
 //
-// Env: PORT (default 48217), API_KEY (optional; header "x-api-key" or "?key=" on /state and /usage),
+// Env: PORT (default 48217), API_KEY (default "group16"; header "x-api-key" or "?key=" on /state and /usage;
+// set it to "" to turn the key off),
 // LOCAL_NO_KEY (default 1; 0 = loopback requests need the key too),
 // DATA_FILE (default ./state.json, or /data/state.json on Railway when a volume is mounted).
 
@@ -17,7 +18,8 @@ const os = require("os");
 const path = require("path");
 
 const PORT = process.env.PORT || 48217;
-const API_KEY = process.env.API_KEY || "";
+// Defaults to the team key the watch sends; set API_KEY to override, or API_KEY="" to require no key.
+const API_KEY = process.env.API_KEY ?? "group16";
 const LOCAL_NO_KEY = process.env.LOCAL_NO_KEY !== "0"; // loopback requests skip the key; "0" turns that off
 const RAILWAY = !!process.env.RAILWAY_ENVIRONMENT;
 // On Railway, use a mounted volume at /data if present; otherwise state is ephemeral.
