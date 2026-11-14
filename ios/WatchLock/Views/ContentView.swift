@@ -15,10 +15,15 @@ struct ContentView: View {
 
     @State private var phase: Phase = .loading
     @State private var refreshing = false
+    /// Increments per request, so a slow older response never overwrites a newer one.
+    @State private var requestID = 0
+    @State private var refreshError: String?
     @State private var lastChecked: Date?
     /// The app the shortcut asked to open. Opened directly: Config.defaultApp.
     @State private var targetApp: String = Config.defaultApp
     @State private var openFailed = false
+    @State private var scrollingAnyway = false
+    @State private var scrollError: String?
 
     private let timer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
@@ -198,7 +203,7 @@ struct ContentView: View {
     private var refreshRow: some View {
         VStack(spacing: 6) {
             Button {
-                Task { await load(fresh: false) }
+                Task { await load(fresh: false, manual: true) }
             } label: {
                 Label(refreshing ? "Checking…" : "Refresh", systemImage: "arrow.clockwise")
                     .font(.subheadline.weight(.semibold))
@@ -206,7 +211,12 @@ struct ContentView: View {
                     .padding(.vertical, 8)
                     .background(Capsule().fill(.white.opacity(0.2)))
             }
-            .disabled(refreshing)
+            if let refreshError {
+                Text(refreshError)
+                    .font(.caption)
+                    .multilineTextAlignment(.center)
+                    .opacity(0.85)
+            }
             if let lastChecked {
                 Text("Checked \(lastChecked, style: .relative) ago")
                     .font(.caption)
@@ -228,6 +238,21 @@ struct ContentView: View {
                     Label("Go to Home Screen", systemImage: "house.fill")
                 }
                 .buttonStyle(PillButtonStyle(primary: true, tint: background))
+
+                if let scrollError {
+                    Text(scrollError)
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                        .opacity(0.85)
+                }
+                Button {
+                    scrollAnyway()
+                } label: {
+                    Label(scrollingAnyway ? "Adding time…" : "Scroll anyway · +\(Config.scrollAnywayMinutes) min debt",
+                          systemImage: "exclamationmark.triangle.fill")
+                }
+                .buttonStyle(PillButtonStyle(primary: false, tint: background))
+                .disabled(scrollingAnyway)
             } else if isClear {
                 let app = targetApp
                 if openFailed {
@@ -253,13 +278,39 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Scroll anyway
+
+    /// Reports extra usage (the watch adds it to the debt), then opens the app.
+    /// If the time can't be recorded, the app is not opened.
+    private func scrollAnyway() {
+        scrollingAnyway = true
+        scrollError = nil
+        let app = targetApp
+        Task {
+            do {
+                let s = try await WatchLockAPI.addUsage(minutes: Config.scrollAnywayMinutes)
+                phase = .loaded(s)
+                if !(await AppLauncher.open(app)) {
+                    scrollError = "Time added, but couldn't open \(app). Is it installed?"
+                }
+            } catch {
+                scrollError = "Couldn't add the time, so \(app) wasn't opened. \(error.localizedDescription)"
+            }
+            scrollingAnyway = false
+        }
+    }
+
     // MARK: - Loading
 
     /// fresh = just opened or came forward: show the spinner so a stale colour never flashes.
-    private func load(fresh: Bool) async {
-        if refreshing { return }
+    /// manual = the Refresh button: always runs, even if an automatic check is still in flight.
+    private func load(fresh: Bool, manual: Bool = false) async {
+        // Only the 3-second timer skips when a request is already running.
+        if refreshing && !fresh && !manual { return }
+        requestID += 1
+        let myID = requestID
         refreshing = true
-        defer { refreshing = false }
+        defer { if myID == requestID { refreshing = false } }
 
         if fresh {
             phase = .loading
@@ -268,11 +319,17 @@ struct ContentView: View {
 
         do {
             let s = try await WatchLockAPI.fetchState()
+            guard myID == requestID else { return } // a newer request already answered
             phase = .loaded(s)
             lastChecked = Date()
+            refreshError = nil
         } catch {
-            // A failed background poll keeps the last good reading on screen.
-            if !fresh, state != nil { return }
+            guard myID == requestID else { return }
+            if !fresh, state != nil {
+                // Keep the last good reading on screen, but tell the user when they asked.
+                if manual { refreshError = "Couldn't refresh: \(error.localizedDescription)" }
+                return
+            }
             phase = .failed(error.localizedDescription)
         }
     }

@@ -29,6 +29,9 @@ enum Config {
     /// Must match the server's API_KEY. Leave empty if the server has none.
     static let apiKey = ""
 
+    /// Minutes of usage the "Scroll anyway" button reports (the watch turns it into tax).
+    static let scrollAnywayMinutes = 5
+
     /// The app to open when Thumb Tax is launched directly (not from a shortcut link).
     static let defaultApp = "Instagram"
 
