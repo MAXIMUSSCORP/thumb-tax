@@ -33,7 +33,8 @@ module Engine {
         }
         Ledger.load();
         Records.load();
-        ScrollSource.start();
+        Badges.load();
+        Sync.start();
         Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE, Sensor.SENSOR_TEMPERATURE, Sensor.SENSOR_PULSE_OXIMETRY]);
         Sensor.enableSensorEvents(new Lang.Method(Engine, :onSensor));
         var t = new Timer.Timer();
@@ -47,10 +48,12 @@ module Engine {
             t.stop();
         }
         _timer = null;
-        ScrollSource.stop();
+        Sync.stop();
         closeSession();
         Ledger.save();
+        Sync.save();
         Records.save();
+        Badges.save();
         Sensor.enableSensorEvents(null);
         Sensor.setEnabledSensors([]);
     }
@@ -66,11 +69,21 @@ module Engine {
         return _info;
     }
 
+    function hour() as Number {
+        return System.getClockTime().hour;
+    }
+
+    function inBed() as Boolean {
+        return _inBed;
+    }
+
     function tick() as Void {
+        var overBuzz = false;
+        var scrolling = Sync.takeSecond();
         _hour = System.getClockTime().hour;
         var t = _temp;
         _inBed = t != null && t >= IN_BED_TEMP_C;
-        if (ScrollSource.isScrolling()) {
+        if (scrolling) {
             if (_sessionSec == 0) {
                 Records.openSession();
             }
@@ -87,19 +100,29 @@ module Engine {
                 _hrCount += 1;
             }
             if (Ledger.isOverdrawn()) {
-                vibrate();
+                overBuzz = true;
             }
             _sinceSave += 1;
             if (_sinceSave >= SAVE_EVERY_SEC) {
                 Ledger.save();
+                Sync.save();
                 Records.save();
+                Badges.save();
                 _sinceSave = 0;
             }
         } else if (_sessionSec > 0) {
             closeSession();
             Ledger.save();
+            Sync.save();
             Records.save();
+            Badges.save();
             _sinceSave = 0;
+        }
+        Badges.onTick(scrolling, Ledger.isOverdrawn(), Sync.isOnline() || Sync.manual() != null);
+        if (Badges.takeBuzz()) {
+            badgeVibrate();
+        } else if (overBuzz) {
+            vibrate();
         }
         var cb = _callback;
         if (cb != null) {
@@ -111,6 +134,7 @@ module Engine {
         Records.closeSession();
         if (_sessionSec > 0) {
             Ledger.closeScrollSession(_sessionSec, _sessionCharged, _sessionNight);
+            Badges.onScrollSessionEnd(_sessionSec);
         }
         _sessionSec = 0;
         _sessionCharged = 0;
@@ -130,17 +154,36 @@ module Engine {
         }
     }
 
+    function badgeVibrate() as Void {
+        if (Attention has :vibrate) {
+            _lastVibeMs = System.getTimer();
+            Attention.vibrate([
+                new Attention.VibeProfile(100, 150), new Attention.VibeProfile(0, 100),
+                new Attention.VibeProfile(100, 150), new Attention.VibeProfile(0, 100),
+                new Attention.VibeProfile(100, 150)]);
+        }
+    }
+
     function onChange(callback as Method()?) as Void {
         _callback = callback;
     }
 
     function state() as Dictionary {
+        var eff = Sync.effBalance(Ledger.balance(), Sync.pendingSec(), Ledger.multiplier(_hour, _inBed));
         return {
             :balanceSec => Ledger.balance(),
+            :debtMin => eff < 0 ? (-eff + 59) / 60 : 0,
+            :creditMin => eff > 0 ? eff / 60 : 0,
+            :pendingSec => Sync.pendingSec(),
+            :suggestion => Sync.suggestion(eff < 0 ? -eff : 0),
+            :syncCode => Sync.lastError(),
+            :syncFails => Sync.fails(),
+            :syncErr => Sync.statusText(),
+            :lastSyncAgoSec => Sync.lastSyncAgoSec(),
             :overdrawn => Ledger.isOverdrawn(),
-            :scrolling => ScrollSource.isScrolling(),
-            :online => ScrollSource.isOnline(),
-            :manual => ScrollSource.manual(),
+            :scrolling => Sync.isScrolling(),
+            :online => Sync.isOnline(),
+            :manual => Sync.manual(),
             :night => Ledger.isNight(_hour),
             :inBed => _inBed,
             :multiplier => Ledger.multiplier(_hour, _inBed),
@@ -149,7 +192,9 @@ module Engine {
             :sessionAvgHr => _hrCount > 0 ? _hrSum / _hrCount : null,
             :hr => _hr,
             :tempC => _temp,
-            :stats => Ledger.stats()
+            :stats => Ledger.stats(),
+            :streak => Badges.streak(),
+            :unseenBadges => Badges.unseen().size()
         };
     }
 }

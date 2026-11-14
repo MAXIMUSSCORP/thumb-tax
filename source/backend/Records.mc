@@ -69,8 +69,7 @@ module Records {
     }
 
     function dayKey() as Number {
-        var c = System.getClockTime();
-        return (Time.now().value() + c.timeZoneOffset + c.dst) / 86400;
+        return Badges.dayKeyNow();
     }
 
     function nowMinute() as Number {

@@ -27,3 +27,8 @@ desktop.ini
 CLAUDE.md
 PLAN.md
 PROGRESS.md
+
+# Server runtime state
+server/state.json
+server/state.json.tmp
+server/node_modules/
