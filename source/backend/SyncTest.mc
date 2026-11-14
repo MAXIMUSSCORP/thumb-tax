@@ -1,4 +1,5 @@
 // Unit tests for Sync's pure functions (usage deltas, suggestion wording, payload); no network.
+import Toybox.Communications;
 import Toybox.Lang;
 import Toybox.Test;
 
@@ -71,6 +72,18 @@ module SyncTest {
         Test.assertEqual(b["creditMinutes"], 2);
         Test.assertEqual(b["activity"], "");
         Test.assertEqual(Sync.payload(60, 60, 2)["taxMinutes"], 1);
+        return true;
+    }
+
+    (:test)
+    function headersCases(logger as Logger) as Boolean {
+        var a = Sync.headersFor("");
+        Test.assertEqual(a["ngrok-skip-browser-warning"], "1");
+        Test.assertEqual(a["Content-Type"], Communications.REQUEST_CONTENT_TYPE_JSON);
+        Test.assert(!a.hasKey("x-api-key"));
+        var b = Sync.headersFor("k");
+        Test.assertEqual(b["x-api-key"], "k");
+        Test.assertEqual(b["ngrok-skip-browser-warning"], "1");
         return true;
     }
 }

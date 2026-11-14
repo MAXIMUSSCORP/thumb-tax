@@ -9,11 +9,12 @@ import Toybox.Timer;
 
 // Real devices require HTTPS and route requests through the paired phone;
 // only the simulator can reach http://127.0.0.1 directly.
-const SERVER_BASE = "http://127.0.0.1:48217";
-const API_KEY = "";
-const POLL_MS = 2000;
-const STALE_MS = 6000;
-const HEARTBEAT_MS = 15000;
+// The public HTTPS tunnel URL goes here; a Cloudflare quick tunnel URL changes every time the tunnel restarts; for local-only testing use http://127.0.0.1:48217 with the simulator's HTTPS requirement setting unticked.
+const SERVER_BASE = "https://descriptions-moms-chan-acne.trycloudflare.com";
+const API_KEY = "tt_3afc30adc4e86d9691a86952";
+const POLL_MS = 4000;
+const STALE_MS = 12000;
+const HEARTBEAT_MS = 20000;
 const MAX_CATCHUP_MIN = 120;
 // Estimated pace, not measured: used only to word the "walk clears it" suggestion.
 const WALK_M_PER_MIN = 80;
@@ -152,10 +153,13 @@ module Sync {
         Application.Storage.setValue(SYNC_KEY, [_seenDay, _seen, _pendingSec, _seenEpoch]);
     }
 
-    function headers() as Dictionary {
-        var h = {"Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON};
-        if (!API_KEY.equals("")) {
-            h["x-api-key"] = API_KEY;
+    function headersFor(apiKey as String) as Dictionary {
+        var h = {
+            "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON,
+            "ngrok-skip-browser-warning" => "1"
+        };
+        if (!apiKey.equals("")) {
+            h["x-api-key"] = apiKey;
         }
         return h;
     }
@@ -175,7 +179,7 @@ module Sync {
         var post = due && !_lastWasPost;
         var options = {
             :method => post ? Communications.HTTP_REQUEST_METHOD_POST : Communications.HTTP_REQUEST_METHOD_GET,
-            :headers => headers(),
+            :headers => headersFor(API_KEY),
             :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
         };
         _inFlight = true;
