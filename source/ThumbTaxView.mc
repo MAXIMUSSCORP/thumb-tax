@@ -155,6 +155,7 @@ class ThumbTaxView extends WatchUi.View {
             }
         }
         drawScrollbar(dc);
+        Notify.draw(dc);
     }
 
     private function drawPage(dc as Dc, p as Number, off as Number) as Void {

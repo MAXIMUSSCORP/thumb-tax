@@ -151,11 +151,15 @@ class AvatarView extends WatchUi.View {
                 dc.fillCircle(x0 + i * gap, y, 3);
             }
         }
+        Notify.draw(dc);
     }
 }
 
 class AvatarDelegate extends WatchUi.BehaviorDelegate {
+    private const EXIT_WINDOW_MS = 2500;
+
     private var _view as AvatarView;
+    private var _backAt as Number = 0;
 
     public function initialize(view as AvatarView) {
         BehaviorDelegate.initialize();
@@ -169,6 +173,18 @@ class AvatarDelegate extends WatchUi.BehaviorDelegate {
 
     public function onPreviousPage() as Boolean {
         _view.cycle(-1);
+        return true;
+    }
+
+    // The mascot is the app's root, so BACK here would close the app (leaving the simulator's idle screen).
+    // The first press only warns; a second press within 2.5 s exits.
+    public function onBack() as Boolean {
+        var now = System.getTimer();
+        if (_backAt != 0 && now - _backAt <= EXIT_WINDOW_MS) {
+            return false;
+        }
+        _backAt = now;
+        Notify.show("Press BACK again", "to exit Thumb Tax", false);
         return true;
     }
 

@@ -112,6 +112,7 @@ class ActivitySessionView extends WatchUi.View {
         } else {
             drawRefused(dc);
         }
+        Notify.draw(dc);
     }
 
     private function drawRunning(dc as Dc) as Void {

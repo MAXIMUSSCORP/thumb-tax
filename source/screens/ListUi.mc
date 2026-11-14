@@ -67,6 +67,7 @@ module ListUi {
         dc.drawText(cx, (h * 0.11).toNumber(), Graphics.FONT_XTINY, title, c);
 
         drawScrollbar(dc, focus, rows.size());
+        Notify.draw(dc);
     }
 
     function drawFocus(dc as Dc, cx as Number, cy as Number, row as Dictionary, maxW as Number) as Void {

@@ -148,6 +148,7 @@ class ScrollMeterView extends WatchUi.View {
 
         dc.setColor(soft, Graphics.COLOR_TRANSPARENT);
         dc.drawText(cx, (h * 0.9).toNumber(), Graphics.FONT_XTINY, "BACK hide", c);
+        Notify.draw(dc);
     }
 
     // "x1 day", "x2 night", "x3 in bed".

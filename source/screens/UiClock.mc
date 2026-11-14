@@ -33,7 +33,10 @@ module UiClock {
     }
 
     function onTick() as Void {
-        ScrollWatch.check();
+        var st = Engine.state();
+        Alerts.check(st);
+        ScrollWatch.check(st);
+        Notify.tick();
         var cb = _listener;
         if (cb != null) {
             cb.invoke();

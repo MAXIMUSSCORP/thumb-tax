@@ -8,8 +8,8 @@ module ScrollWatch {
     var _shown as Boolean = false;
     var _dismissed as Boolean = false;
 
-    function check() as Void {
-        var scrolling = Engine.state()[:scrolling] == true;
+    function check(st as Dictionary) as Void {
+        var scrolling = st[:scrolling] == true;
         if (!scrolling) {
             _dismissed = false;
             return;
