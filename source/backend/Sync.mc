@@ -17,8 +17,10 @@ const HEARTBEAT_MS = 20000;
 const MAX_CATCHUP_MIN = 120;
 // Estimated pace, not measured: used only to word the "walk clears it" suggestion.
 const WALK_M_PER_MIN = 80;
-const PUSHUP_MAX = 30;
+const REPS_MAX = 50;
 const STAIRS_MAX = 15;
+const EARN_MORE_MIN = 10;
+const MAX_TEXT = 120;
 const IN_FLIGHT_TIMEOUT_MS = 10000;
 const SYNC_KEY = "sy";
 
@@ -89,20 +91,95 @@ module Sync {
         return Math.ceil(a.toFloat() / b).toNumber();
     }
 
+    // Pace table: typical reps (or floors) per minute for the rep and floor kinds. Estimated, not measured.
+    function pace(id as Symbol) as Float? {
+        var t = {:jumpingJacks => 60.0, :squats => 25.0, :lunges => 20.0, :pushups => 20.0,
+                 :dips => 15.0, :deadbug => 20.0, :birdDog => 20.0, :stairs => 4.0};
+        return t[id] as Float?;
+    }
+
+    // One payoff option for `sec` seconds of credit: {:id, :min, :text}, or null if unusable.
+    // `capped` applies the practicality limits (rep and floor counts, kind caps).
+    function option(id as Symbol, sec as Number, capped as Boolean) as Dictionary? {
+        var def = Catalog.get(id);
+        if (def == null) {
+            return null;
+        }
+        var unit = def[:unit] as Symbol;
+        var label = (def[:label] as String).toLower();
+        if (id == :walk) {
+            var m = ceilDiv(sec, WALK_M_PER_MIN * Ledger.WALK_SEC_PER_KM / 1000.0);
+            return {:id => id, :min => m, :text => "a " + m + " min walk"};
+        }
+        var rate = def[:rate] as Float;
+        if (unit == :sec) {
+            var cap = def[:cap] as Number?;
+            if (capped && cap != null && cap < sec) {
+                return null;
+            }
+            var t = ceilDiv(sec, rate * 60.0);
+            return {:id => id, :min => t, :text => t + " min " + label};
+        }
+        var p = pace(id);
+        if (p == null) {
+            return null;
+        }
+        var n = ceilDiv(sec, rate);
+        var floors = unit == :floor;
+        if (capped && n > (floors ? STAIRS_MAX : REPS_MAX)) {
+            return null;
+        }
+        return {:id => id, :min => ceilDiv(sec, rate * p), :text => floors ? n + " floors of stairs" : n + " " + label};
+    }
+
+    // The two fastest options for `sec` seconds of credit (second may be null; first is null only if nothing qualifies).
+    function rank(sec as Number) as Array<Dictionary?> {
+        var all = Catalog.all();
+        var ids = [] as Array<Symbol>;
+        for (var i = 0; i < all.size(); i++) {
+            var d = all[i];
+            var g = d[:group];
+            if ((g == :exercise || g == :chore) && !(d[:daily] as Boolean) && d[:detector] != :outdoors && d[:detector] != :calm) {
+                ids.add(d[:id] as Symbol);
+            }
+        }
+        ids.add(:walk);
+        var b1 = null as Dictionary?;
+        var b2 = null as Dictionary?;
+        for (var i = 0; i < ids.size(); i++) {
+            var o = option(ids[i], sec, true);
+            if (o == null) {
+                continue;
+            }
+            if (b1 == null || (o[:min] as Number) < (b1[:min] as Number)) {
+                b2 = b1;
+                b1 = o;
+            } else if (b2 == null || (o[:min] as Number) < (b2[:min] as Number)) {
+                b2 = o;
+            }
+        }
+        return [b1, b2] as Array<Dictionary?>;
+    }
+
     function suggestion(debtSec as Number) as String {
+        var e = rank(EARN_MORE_MIN * 60)[0];
+        var earn = e == null ? "" : e[:text] as String;
         if (debtSec <= 0) {
+            return "Earn " + EARN_MORE_MIN + " min to scroll: " + earn;
+        }
+        var r = rank(debtSec);
+        var b1 = r[0];
+        var b2 = r[1];
+        if (b1 == null) {
             return "";
         }
-        var w = ceilDiv(debtSec, WALK_M_PER_MIN * Ledger.WALK_SEC_PER_KM / 1000.0);
-        var p = ceilDiv(debtSec, (Catalog.get(:pushups) as Dictionary)[:rate] as Float);
-        if (p <= PUSHUP_MAX) {
-            return p + " push-ups or a " + w + " min walk clears it";
+        var tail = e == null ? "" : ". +" + EARN_MORE_MIN + " min to scroll: " + earn;
+        var one = b1[:text] + " clears it";
+        var s = b2 == null ? one + tail : b1[:text] + " or " + b2[:text] + " clears it" + tail;
+        if (s.length() > MAX_TEXT) {
+            s = one + tail;
         }
-        var f = ceilDiv(debtSec, (Catalog.get(:stairs) as Dictionary)[:rate] as Float);
-        if (f <= STAIRS_MAX) {
-            return f + " floors of stairs or a " + w + " min walk clears it";
-        }
-        return "A " + w + " min walk clears it";
+        return s.length() > MAX_TEXT ? one : s;
     }
 
     function payload(balanceSec as Number, pendingSec as Number, mult as Number) as Dictionary {

@@ -51,13 +51,45 @@ module SyncTest {
         return true;
     }
 
-    // Walk earns 48 s/min (80 m/min * 600 s/km), push-ups 10 s each, stairs 120 s per floor.
+    // Credit per minute: jumping jacks 180 s, stairs 480 s, high knees/plank 180 s, cold shower 240 s, walk 60 s.
+    // Rep kinds over 50 reps and stairs over 15 floors are skipped as impractical.
     (:test)
     function suggestionText(logger as Logger) as Boolean {
-        Test.assertEqual(Sync.suggestion(0), "");
-        Test.assertEqual(Sync.suggestion(120), "12 push-ups or a 3 min walk clears it");
-        Test.assertEqual(Sync.suggestion(900), "8 floors of stairs or a 19 min walk clears it");
-        Test.assertEqual(Sync.suggestion(3600), "A 75 min walk clears it");
+        Test.assertEqual(Sync.suggestion(0), "Earn 10 min to scroll: 5 floors of stairs");
+        Test.assertEqual(Sync.suggestion(60), "20 jumping jacks or 10 squats clears it. +10 min to scroll: 5 floors of stairs");
+        Test.assertEqual(Sync.suggestion(120), "40 jumping jacks or 20 squats clears it. +10 min to scroll: 5 floors of stairs");
+        Test.assertEqual(Sync.suggestion(600), "5 floors of stairs or 3 min cold shower clears it. +10 min to scroll: 5 floors of stairs");
+        Test.assertEqual(Sync.suggestion(2400), "14 min high knees or 14 min plank clears it. +10 min to scroll: 5 floors of stairs");
+        Test.assertEqual(Sync.suggestion(7200), "40 min high knees or 40 min plank clears it. +10 min to scroll: 5 floors of stairs");
+        return true;
+    }
+
+    (:test)
+    function suggestionFilters(logger as Logger) as Boolean {
+        var long = Sync.suggestion(2400);
+        Test.assert(long.find("50 min walk") == null);
+        Test.assert(long.find("cold shower") == null);
+        var debts = [60, 600, 720, 721, 2400, 7200];
+        for (var i = 0; i < debts.size(); i++) {
+            var s = Sync.suggestion(debts[i] as Number);
+            Test.assert(s.length() <= 120);
+            Test.assert(s.find("sunlight") == null);
+            Test.assert(s.find("mow") == null);
+            Test.assert(s.find("meditation") == null);
+            Test.assert(s.find("!") == null);
+        }
+        Test.assert(Sync.suggestion(720).find("cold shower") != null);
+        Test.assert(Sync.suggestion(721).find("cold shower") == null);
+        return true;
+    }
+
+    // Walk credit is 80 m/min * 750 s/km = 60 s per minute.
+    (:test)
+    function walkOption(logger as Logger) as Boolean {
+        var o = Sync.option(:walk, 2400, true) as Dictionary;
+        Test.assertEqual(o[:min], 40);
+        Test.assertEqual(o[:text], "a 40 min walk");
+        Test.assert(Sync.option(:nope, 60, true) == null);
         return true;
     }
 
@@ -70,7 +102,8 @@ module SyncTest {
         var b = Sync.payload(125, 0, 1);
         Test.assertEqual(b["taxMinutes"], 0);
         Test.assertEqual(b["creditMinutes"], 2);
-        Test.assertEqual(b["activity"], "");
+        Test.assertEqual(b["activity"], "Earn 10 min to scroll: 5 floors of stairs");
+        Test.assertEqual(a["activity"], Sync.suggestion(61));
         Test.assertEqual(Sync.payload(60, 60, 2)["taxMinutes"], 1);
         return true;
     }

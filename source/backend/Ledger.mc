@@ -6,7 +6,7 @@ import Toybox.Time;
 import Toybox.Time.Gregorian;
 
 module Ledger {
-    const WALK_SEC_PER_KM = 600;
+    const WALK_SEC_PER_KM = 750;
     const CLIMB_SEC_PER_M = 12;
     const DAY_MULT = 1;
     const NIGHT_MULT = 2;

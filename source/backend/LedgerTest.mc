@@ -67,12 +67,12 @@ module LedgerTest {
         Ledger.reset();
         Test.assertEqual(Ledger.earn(:pushups, 12), 120);
         Test.assertEqual(Ledger.earn(:stairs, 3), 360);
-        Test.assertEqual(Ledger.earn(:walkM, 1500), 900);
+        Test.assertEqual(Ledger.earn(:walkM, 1500), 1125);
         Test.assertEqual(Ledger.earn(:climbM, 50), 600);
         Test.assertEqual(Ledger.earn(:read, 1200), 600);
-        Test.assertEqual(Ledger.balance(), 2580);
+        Test.assertEqual(Ledger.balance(), 2805);
         Test.assertEqual(Ledger.history().size(), 5);
-        Test.assertEqual(Ledger.stats()[:earnedSec], 2580);
+        Test.assertEqual(Ledger.stats()[:earnedSec], 2805);
         cleanup();
         return true;
     }
