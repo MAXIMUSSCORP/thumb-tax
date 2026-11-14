@@ -35,6 +35,10 @@ module Engine {
         }
         Ledger.load();
         Records.load();
+        if (Records.SEED_DEMO_HISTORY) {
+            Records.seedDemoHistory();
+            Records.save();
+        }
         Badges.load();
         Sync.start();
         Sensor.setEnabledSensors([Sensor.SENSOR_HEARTRATE, Sensor.SENSOR_TEMPERATURE, Sensor.SENSOR_PULSE_OXIMETRY]);

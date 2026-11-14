@@ -21,6 +21,8 @@ module Records {
     const DEFAULT_RESTING_HR = 60;
     const SPO2_WINDOW_SEC = 43200;
     const KEY = "rc_d";
+    // One switch for the one-time demo history (see seedDemoHistory).
+    const SEED_DEMO_HISTORY = true;
 
     const DEMO_WEEK_DAY_MIN = [22, 35, 18, 40, 28, 15, 12] as Array<Number>;
     const DEMO_WEEK_NIGHT_MIN = [45, 30, 55, 20, 60, 25, 38] as Array<Number>;
@@ -35,6 +37,7 @@ module Records {
 
     var _loaded as Boolean = false;
     var _real as Boolean = false;
+    var _seeded as Boolean = false;
     var _dayKey as Number = 0;
     // Week rings, oldest first, last = today. Seconds, except _spo2 (percent).
     var _day as Array<Number> = [];
@@ -81,6 +84,7 @@ module Records {
     function clear() as Void {
         _loaded = true;
         _real = false;
+        _seeded = false;
         _dayKey = dayKey();
         _day = zeros(7);
         _night = zeros(7);
@@ -119,9 +123,10 @@ module Records {
         }
         clear();
         var d = Application.Storage.getValue(KEY) as Array?;
-        if (d == null || d.size() != STORE_SIZE) {
+        if (d == null || d.size() < STORE_SIZE) {
             return;
         }
+        _seeded = d.size() > STORE_SIZE && (d[STORE_SIZE] as Number) == 1;
         _dayKey = d[0] as Number;
         _real = (d[1] as Number) == 1;
         _day = d[2] as Array<Number>;
@@ -145,7 +150,80 @@ module Records {
     function save() as Void {
         load();
         Application.Storage.setValue(KEY, [_dayKey, _real ? 1 : 0, _day, _night, _earn, _hrSum, _hrN, _spo2,
-            _prev, _hourly, _earnHourly, _bins, _nextBins, _pend, _sessions, _open, _chDay, _chHourly]);
+            _prev, _hourly, _earnHourly, _bins, _nextBins, _pend, _sessions, _open, _chDay, _chHourly, _seeded ? 1 : 0]);
+    }
+
+    function restingHr() as Number {
+        var p = UserProfile.getProfile();
+        if (p != null && p.restingHeartRate != null) {
+            return p.restingHeartRate as Number;
+        }
+        return DEFAULT_RESTING_HR;
+    }
+
+    function minutesToSec(a as Array<Number>) as Array<Number> {
+        var out = [] as Array<Number>;
+        for (var i = 0; i < a.size(); i++) {
+            out.add(a[i] * 60);
+        }
+        return out;
+    }
+
+    // Once per install: gives the trend charts a past. Previous 6 ring days come from the DEMO_* series 0..5,
+    // today gets only its finished empty hours, so real data is never overwritten or doubled.
+    function seedDemoHistory() as Void {
+        ready();
+        if (_seeded) {
+            return;
+        }
+        _seeded = true;
+        _real = true;
+        var rest = restingHr();
+        for (var i = 0; i < 6; i++) {
+            if (_day[i] + _night[i] + _earn[i] + _chDay[i] > 0) {
+                continue;
+            }
+            _day[i] = DEMO_WEEK_DAY_MIN[i] * 60;
+            _night[i] = DEMO_WEEK_NIGHT_MIN[i] * 60;
+            _earn[i] = DEMO_WEEK_EARNED_MIN[i] * 60;
+            _chDay[i] = (DEMO_WEEK_DAY_MIN[i] + DEMO_WEEK_NIGHT_MIN[i] * NIGHT_RATE) * 60;
+            _hrSum[i] = DEMO_WEEK_HR_LIFT[i] + rest;
+            _hrN[i] = 1;
+            _spo2[i] = DEMO_WEEK_SPO2[i];
+        }
+        if (_prev.size() == 0) {
+            _prev = [DEMO_LAST_WEEK_TAXED * 60];
+        }
+        if (sum(_bins) == 0) {
+            _bins = minutesToSec(DEMO_LAST_NIGHT_BINS);
+        }
+        var nowH = nowMinute() / 60;
+        for (var h = 0; h < nowH; h++) {
+            if (_hourly[h] > 0 || _earnHourly[h] > 0 || _chHourly[h] > 0) {
+                continue;
+            }
+            var sec = DEMO_TODAY_HOURLY_MIN[h] * 60;
+            _hourly[h] = sec;
+            _earnHourly[h] = DEMO_TODAY_EARNED_HOURLY[h] * 60;
+            _earn[6] += _earnHourly[h];
+            var ch = sec * (isNightHour(h) ? NIGHT_RATE : 1);
+            _chHourly[h] = ch;
+            _chDay[6] += ch;
+            if (h >= NIGHT_FROM) {
+                _pend[0] += sec;
+            } else if (h < NIGHT_TO) {
+                _night[6] += sec;
+            } else {
+                _day[6] += sec;
+            }
+        }
+        if (_sessions.size() == 0 && _open < 0) {
+            for (var i = 0; i < DEMO_TODAY_SESSIONS.size(); i++) {
+                if (DEMO_TODAY_SESSIONS[i][1] < nowH * 60) {
+                    _sessions.add(DEMO_TODAY_SESSIONS[i]);
+                }
+            }
+        }
     }
 
     function shiftLeft(a as Array<Number>) as Array<Number> {
@@ -324,11 +402,7 @@ module Records {
         if (!_real) {
             return DEMO_WEEK_HR_LIFT;
         }
-        var rest = DEFAULT_RESTING_HR;
-        var p = UserProfile.getProfile();
-        if (p != null && p.restingHeartRate != null) {
-            rest = p.restingHeartRate as Number;
-        }
+        var rest = restingHr();
         var out = [] as Array<Number>;
         for (var i = 0; i < 7; i++) {
             var lift = (_hrN[i] > 0) ? _hrSum[i] / _hrN[i] - rest : 0;
