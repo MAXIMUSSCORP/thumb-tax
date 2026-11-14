@@ -27,3 +27,13 @@ desktop.ini
 CLAUDE.md
 PLAN.md
 PROGRESS.md
+
+# iOS: local-only config and signing (single developer, never shared)
+ios/*.xcodeproj/
+ios/Config/
+ios/WatchLock/Config.swift
+ios/WatchLock/Info.plist
+xcuserdata/
+*.xcuserstate
+# Server runtime data
+server/state.json
