@@ -10,7 +10,7 @@ import Toybox.Timer;
 // Real devices require HTTPS and route requests through the paired phone;
 // only the simulator can reach http://127.0.0.1 directly.
 // The public HTTPS tunnel URL goes here; a Cloudflare quick tunnel URL changes every time the tunnel restarts; for local-only testing use http://127.0.0.1:48217 with the simulator's HTTPS requirement setting unticked.
-const SERVER_BASE = "https://descriptions-moms-chan-acne.trycloudflare.com";
+const SERVER_BASE = "https://bags-democrats-difference-pages.trycloudflare.com";
 const API_KEY = "tt_3afc30adc4e86d9691a86952";
 const POLL_MS = 4000;
 const STALE_MS = 12000;
