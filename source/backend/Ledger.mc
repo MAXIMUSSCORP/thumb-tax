@@ -102,6 +102,13 @@ module Ledger {
         return _balance;
     }
 
+    // The server owns the balance; this mirrors it without a history entry or an outgoing delta.
+    function applyServerBalance(sec as Number) as Void {
+        load();
+        _balance = sec;
+        save();
+    }
+
     function isOverdrawn() as Boolean {
         load();
         return _balance < 0;
@@ -130,6 +137,7 @@ module Ledger {
             _scrollDay += seconds;
         }
         _fee += charged - seconds;
+        Sync.noteDelta(-charged, "scroll");
         return charged;
     }
 
@@ -181,7 +189,9 @@ module Ledger {
         _earned += sec;
         addHistory(sec, why);
         Records.addEarned(sec);
+        Sync.noteDelta(sec, why);
         save();
+        Sync.save();
         Records.save();
         return sec;
     }

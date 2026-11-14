@@ -1,13 +1,15 @@
-// WatchLock server, zero dependencies, Node 18+. Contract v1.
-// Stores tax minutes (watch), credit minutes (watch) and phone usage (iOS or panel).
+// WatchLock server, zero dependencies, Node 18+. Contract v2: the server is the bank.
+// It holds balanceSec; the watch, the panel and iOS send transactions to /ledger.
+// taxMinutes and creditMinutes are derived on every response, never stored.
 //
 //   GET  /health  -> {ok:true}
 //   GET  /state   -> full state
-//   POST /state   -> {taxMinutes, creditMinutes, activity, source}, at least one of the first three
+//   POST /state   -> {activity, pendingChargeSec, source}, at least one of the first two
+//   POST /ledger  -> {deltaSec, reason, source, session?, eventId?, activity?, pendingChargeSec?}
 //   POST /usage   -> {usedMinutesToday 0..1440, day?, reset?}
 //   GET  /        -> control panel
 //
-// Env: PORT (default 48217), API_KEY (default "group16"; header "x-api-key" or "?key=" on /state and /usage;
+// Env: PORT (default 48217), API_KEY (default "group16"; header "x-api-key" or "?key=" on /state, /ledger and /usage;
 // set it to "" to turn the key off),
 // LOCAL_NO_KEY (default 1; 0 = loopback requests need the key too),
 // DATA_FILE (default ./state.json, or /data/state.json on Railway when a volume is mounted).
@@ -46,8 +48,10 @@ const newEpoch = () => Date.now().toString(36) + Math.random().toString(36).slic
 
 let state = {
   usageEpoch: newEpoch(), // changes only on reset:true; tells the watch to rebaseline
-  taxMinutes: 0,
-  creditMinutes: 0,
+  balanceSec: 0, // signed: positive = credit, negative = debt
+  pendingChargeSec: 0, // reported by the watch: counted but not yet charged
+  history: [], // last 20, newest first
+  ledgerSessions: {}, // {source: {session, lastEventId}}
   activity: null,
   usedMinutesToday: 0,
   usageDay: today(),
@@ -58,7 +62,14 @@ let state = {
 
 try {
   const saved = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  if (typeof saved.taxMinutes === "number") state = { ...state, ...saved };
+  if (typeof saved.taxMinutes === "number" || typeof saved.balanceSec === "number") {
+    state = { ...state, ...saved };
+    if (typeof saved.balanceSec !== "number") state.balanceSec = ((saved.creditMinutes || 0) - (saved.taxMinutes || 0)) * 60;
+    delete state.taxMinutes;
+    delete state.creditMinutes;
+    if (!Array.isArray(state.history)) state.history = [];
+    if (!state.ledgerSessions || typeof state.ledgerSessions !== "object") state.ledgerSessions = {};
+  }
 } catch (e) {
   if (e.code !== "ENOENT") console.error("could not load", DATA_FILE, "starting from defaults:", e.message);
 }
@@ -73,7 +84,19 @@ function save() {
   }
 }
 
-save(); // persist a freshly generated usageEpoch
+save(); // persist a freshly generated usageEpoch (and a migration)
+
+// What clients see: derived tax/credit, history capped at 10, no ledgerSessions.
+function view() {
+  const { ledgerSessions, ...rest } = state;
+  const eff = state.balanceSec - state.pendingChargeSec;
+  return {
+    ...rest,
+    taxMinutes: Math.ceil(Math.max(0, -eff) / 60),
+    creditMinutes: Math.floor(Math.max(0, eff) / 60),
+    history: state.history.slice(0, 10),
+  };
+}
 
 function roll() {
   const t = today();
@@ -91,19 +114,51 @@ function num(v) {
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
 }
 
-function applyUpdate(body) {
-  const tax = num(body.taxMinutes);
-  const credit = num(body.creditMinutes);
+// Sets activity and pendingChargeSec when present; returns true if either was.
+function setWatchFields(body) {
+  const pending = num(body.pendingChargeSec);
   const hasActivity = typeof body.activity === "string" || body.activity === null;
-  if (tax === null && credit === null && !hasActivity) return null;
-  if (tax !== null) state.taxMinutes = tax;
-  if (credit !== null) state.creditMinutes = credit;
+  if (pending === null && !hasActivity) return false;
+  if (pending !== null) state.pendingChargeSec = pending;
   if (hasActivity) state.activity = body.activity ? body.activity.slice(0, 120) : null;
+  return true;
+}
+
+function applyUpdate(body) {
+  if (!setWatchFields(body)) return null;
   state.source = typeof body.source === "string" && body.source ? body.source : "watch";
   state.updatedAt = new Date().toISOString();
   save();
-  console.log(state.updatedAt, "tax =", state.taxMinutes, "credit =", state.creditMinutes, "activity =", state.activity, "from", state.source);
-  return state;
+  console.log(state.updatedAt, "pending =", state.pendingChargeSec, "activity =", state.activity, "from", state.source);
+  return view();
+}
+
+const SOURCES = ["watch", "panel", "ios"];
+function applyLedger(body) {
+  const d = body.deltaSec;
+  if (!Number.isInteger(d) || d === 0 || Math.abs(d) > 86400) return { code: 400, body: { error: "deltaSec must be a non-zero integer, at most 86400 either way" } };
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (reason.length < 1 || reason.length > 60) return { code: 400, body: { error: "reason must be 1..60 characters" } };
+  const src = body.source;
+  if (!SOURCES.includes(src)) return { code: 400, body: { error: "source must be watch, panel or ios" } };
+  const last = () => (state.ledgerSessions[src] ? state.ledgerSessions[src].lastEventId : null);
+  const dedupe = typeof body.session === "string" && body.session !== "" && Number.isInteger(body.eventId);
+  if (dedupe) {
+    const cur = state.ledgerSessions[src];
+    if (cur && cur.session === body.session && body.eventId <= cur.lastEventId) {
+      return { code: 200, body: { ...view(), applied: false, lastEventId: last() } };
+    }
+    state.ledgerSessions[src] = { session: body.session, lastEventId: body.eventId };
+  }
+  const now = new Date().toISOString();
+  state.balanceSec += d;
+  state.history = [{ t: now, deltaSec: d, reason, source: src }, ...state.history].slice(0, 20);
+  setWatchFields(body);
+  state.source = src;
+  state.updatedAt = now;
+  save();
+  console.log(now, "ledger", d, "s", reason, "from", src, "balance =", state.balanceSec);
+  return { code: 200, body: { ...view(), applied: true, lastEventId: last() } };
 }
 
 function applyUsage(body) {
@@ -123,7 +178,7 @@ function applyUsage(body) {
   state.usedMinutesToday = used;
   state.usageUpdatedAt = new Date().toISOString();
   save();
-  return { code: 200, body: state };
+  return { code: 200, body: view() };
 }
 
 function send(res, code, body, type = "application/json") {
@@ -205,12 +260,16 @@ async function handle(req, res) {
 
   if (p === "/state" && req.method === "GET") {
     roll();
-    return send(res, 200, state);
+    return send(res, 200, view());
   }
   if (p === "/state" && req.method === "POST") {
     const result = applyUpdate(await readBody(req));
-    if (!result) return send(res, 400, { error: "send taxMinutes, creditMinutes and/or activity" });
+    if (!result) return send(res, 400, { error: "send activity and/or pendingChargeSec" });
     return send(res, 200, result);
+  }
+  if (p === "/ledger" && req.method === "POST") {
+    const r = applyLedger(await readBody(req));
+    return send(res, r.code, r.body);
   }
   if (p === "/usage" && req.method === "POST") {
     const r = applyUsage(await readBody(req));
@@ -249,35 +308,42 @@ const PANEL_HTML = `<!doctype html>
  .muted{color:#888;font-size:13px}
 </style></head><body>
 <h1>WatchLock control panel</h1>
-<p class="muted">Stand-in for the Fenix while you test. Setting tax minutes here is exactly what the watch does.</p>
 <div id="num" class="big">…</div>
 <div id="label" class="label"></div>
+<div id="split" class="muted"></div>
+<p><button onclick="bank(300,'panel +5 min')">+5 min</button><button onclick="bank(900,'panel +15 min')">+15 min</button><button onclick="bank(-300,'panel -5 min')">-5 min</button><button onclick="bank(-900,'panel -15 min')">-15 min</button><button id="clr" onclick="bank(debt,'panel clear debt')">Clear debt</button></p>
+<p class="muted">The watch and the panel both move the same balance.</p>
 <div id="meta" class="muted"></div>
-<p><button onclick="setTax(cur-1)">−1</button><button onclick="setTax(cur+1)">+1</button><button onclick="setTax(cur+5)">+5</button><button onclick="setTax(cur+15)">+15</button><button onclick="setTax(0)">Set 0</button></p>
-<p class="muted">The watch overwrites these within 15 s when it is running.</p>
-<div id="credit" class="muted"></div>
-<label>Set tax minutes</label><input id="val" type="number" min="0"> <button onclick="setTax(Number(val.value))">Set</button>
+<h1>Recent</h1>
+<div id="recent" class="muted"></div>
 <label>Activity suggestion (optional, shown on the phone's blocked screen)</label><input id="act" style="width:240px"> <button onclick="setAct(act.value)">Send</button> <button onclick="setAct(null)">Clear</button>
 <h1>Phone usage (stand-in for iOS)</h1>
 <div id="usage" class="label"></div>
 <p><button onclick="addUse(1)">+1</button><button onclick="addUse(5)">+5</button><button onclick="resetUse()">Reset day</button></p>
 <label>API key (only if the server has one)</label><input id="key" style="width:200px">
 <script>
-let cur=0,used=0;
+let debt=0,used=0;
 const keyEl=document.getElementById('key');keyEl.value=localStorage.getItem('wl_key')||'';
 keyEl.onchange=()=>{localStorage.setItem('wl_key',keyEl.value);refresh()};
 function hdr(){return {'Content-Type':'application/json','x-api-key':keyEl.value}}
 async function refresh(){
   const r=await fetch('/state',{headers:hdr()});if(!r.ok){num.textContent='–';label.textContent='Auth error: enter the API key';return}
-  const s=await r.json();cur=s.taxMinutes;
-  num.textContent=s.taxMinutes;num.className='big '+(s.taxMinutes>0?'due':'clear');
-  label.textContent=s.taxMinutes>0?'tax minutes left, apps blocked':'tax minutes, apps open';
-  credit.textContent='Credit minutes: '+s.creditMinutes;used=s.usedMinutesToday;
+  const s=await r.json();const b=s.balanceSec;debt=Math.max(0,-b);used=s.usedMinutesToday;
+  const m=Math.round(Math.abs(b)/60);
+  num.textContent=b<0?'-'+m+' min debt':b>0?'+'+m+' min credit':'0 min';num.className='big '+(b<0?'due':'clear');
+  label.textContent=b<0?'apps blocked':'apps open';
+  split.textContent='Tax minutes: '+s.taxMinutes+' · Credit minutes: '+s.creditMinutes;
+  clr.disabled=debt===0;
   usage.textContent=s.usedMinutesToday+' min used on '+s.usageDay;
   meta.textContent=(s.activity?'Activity: '+s.activity+' · ':'')+'from '+s.source+' · '+new Date(s.updatedAt).toLocaleTimeString();
+  recent.textContent='';
+  for(const h of s.history){const d=document.createElement('div');const x=Math.round(h.deltaSec/60*10)/10;
+    d.textContent=new Date(h.t).toLocaleTimeString()+'  '+(x>0?'+':'')+x+' min  '+h.reason+'  ('+h.source+')';recent.appendChild(d)}
+  if(!s.history.length)recent.textContent='Nothing yet';
 }
-async function setTax(n){
-  await fetch('/state',{method:'POST',headers:hdr(),body:JSON.stringify({taxMinutes:Math.max(0,n),source:'panel'})});refresh()
+async function bank(sec,reason){
+  if(!sec)return;
+  await fetch('/ledger',{method:'POST',headers:hdr(),body:JSON.stringify({deltaSec:sec,reason:reason,source:'panel'})});refresh()
 }
 async function setAct(a){
   await fetch('/state',{method:'POST',headers:hdr(),body:JSON.stringify({activity:a,source:'panel'})});refresh()

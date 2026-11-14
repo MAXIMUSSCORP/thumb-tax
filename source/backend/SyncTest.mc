@@ -1,4 +1,5 @@
 // Unit tests for Sync's pure functions (usage deltas, suggestion wording, payload); no network.
+import Toybox.Application;
 import Toybox.Communications;
 import Toybox.Lang;
 import Toybox.Test;
@@ -96,15 +97,112 @@ module SyncTest {
     (:test)
     function payloadCases(logger as Logger) as Boolean {
         var a = Sync.payload(-61, 0, 1);
-        Test.assertEqual(a["taxMinutes"], 2);
-        Test.assertEqual(a["creditMinutes"], 0);
-        Test.assertEqual(a["source"], "watch");
-        var b = Sync.payload(125, 0, 1);
-        Test.assertEqual(b["taxMinutes"], 0);
-        Test.assertEqual(b["creditMinutes"], 2);
-        Test.assertEqual(b["activity"], "Earn 10 min to scroll: 5 floors of stairs");
+        Test.assertEqual(a["pendingChargeSec"], 0);
         Test.assertEqual(a["activity"], Sync.suggestion(61));
-        Test.assertEqual(Sync.payload(60, 60, 2)["taxMinutes"], 1);
+        Test.assert(!a.hasKey("taxMinutes"));
+        var b = Sync.payload(125, 0, 1);
+        Test.assertEqual(b["activity"], "Earn 10 min to scroll: 5 floors of stairs");
+        var c = Sync.payload(60, 60, 2);
+        Test.assertEqual(c["pendingChargeSec"], 120);
+        Test.assertEqual(c["activity"], Sync.suggestion(60));
+        return true;
+    }
+
+    (:test)
+    function reconcileCases(logger as Logger) as Boolean {
+        Test.assertEqual(Sync.reconcile(100, 0, 0), 100);
+        Test.assertEqual(Sync.reconcile(100, -8, -2), 90);
+        Test.assertEqual(Sync.reconcile(-50, 0, 30), -20);
+        return true;
+    }
+
+    (:test)
+    function outboxAccumulatesIntoOneEvent(logger as Logger) as Boolean {
+        Sync.resetOutbox();
+        Sync.noteDelta(-5, "scroll");
+        Sync.noteDelta(-3, "scroll");
+        Sync.noteDelta(0, "ignored");
+        Sync.startEvent();
+        var ev = Sync._inflight as Dictionary;
+        Test.assertEqual(ev[:id], 1);
+        Test.assertEqual(ev[:delta], -8);
+        Test.assertEqual(ev[:reason], "scroll");
+        Test.assertEqual(Sync._unsent, 0);
+        Sync.noteDelta(60, "Squats x6");
+        Sync.startEvent();
+        Test.assertEqual((Sync._inflight as Dictionary)[:id], 1);
+        Test.assertEqual(Sync._unsent, 60);
+        Sync.resetOutbox();
+        Sync.noteDelta(-1, "scroll");
+        Sync.noteDelta(10, "Squats x1");
+        Test.assertEqual(Sync._unsentReason, "watch activity");
+        Sync.resetOutbox();
+        return true;
+    }
+
+    (:test)
+    function outboxRetryAndAck(logger as Logger) as Boolean {
+        Sync.resetOutbox();
+        Sync.noteDelta(-8, "scroll");
+        Sync.startEvent();
+        Sync.noteDelta(-2, "scroll");
+        Sync.startEvent();
+        var ev = Sync._inflight as Dictionary;
+        Test.assertEqual(ev[:id], 1);
+        Test.assertEqual(ev[:delta], -8);
+        Sync.ackEvent();
+        Test.assert(Sync._inflight == null);
+        Test.assertEqual(Sync._unsent, -2);
+        Sync.startEvent();
+        ev = Sync._inflight as Dictionary;
+        Test.assertEqual(ev[:id], 2);
+        Test.assertEqual(ev[:delta], -2);
+        Sync.ackEvent();
+        Sync.resetOutbox();
+        Application.Storage.deleteValue(SYNC_KEY);
+        return true;
+    }
+
+    (:test)
+    function sessionPersisted(logger as Logger) as Boolean {
+        Sync.resetOutbox();
+        var s = Sync.ensureSession();
+        Test.assert(s.length() > 0);
+        Test.assertEqual(Sync.ensureSession(), s);
+        Sync.noteDelta(-4, "scroll");
+        Sync.startEvent();
+        var saved = Application.Storage.getValue(SYNC_KEY);
+        Sync.resetOutbox();
+        Sync.restore(saved);
+        Test.assertEqual(Sync.ensureSession(), s);
+        Test.assertEqual(Sync._nextEventId, 2);
+        Test.assertEqual((Sync._inflight as Dictionary)[:delta], -4);
+        Sync.resetOutbox();
+        Sync.restore(["d", 5, 7, "e"]);
+        Test.assertEqual(Sync._pendingSec, 7);
+        Test.assertEqual(Sync._nextEventId, 1);
+        Sync.resetOutbox();
+        Application.Storage.deleteValue(SYNC_KEY);
+        return true;
+    }
+
+    (:test)
+    function eventBodyFields(logger as Logger) as Boolean {
+        Sync.resetOutbox();
+        var b = Sync.eventBody({:id => 3, :delta => -9, :reason => "scroll"}, 120, "Walk");
+        var keys = ["deltaSec", "reason", "source", "session", "eventId", "activity", "pendingChargeSec"];
+        for (var i = 0; i < keys.size(); i++) {
+            Test.assert(b.hasKey(keys[i]));
+            Test.assert(b[keys[i]] != null);
+        }
+        Test.assertEqual(b["deltaSec"], -9);
+        Test.assertEqual(b["eventId"], 3);
+        Test.assertEqual(b["pendingChargeSec"], 120);
+        Test.assertEqual(b["source"], "watch");
+        Test.assertEqual(b["session"], Sync.ensureSession());
+        var long = Sync.eventBody({:id => 1, :delta => 1, :reason => "0123456789012345678901234567890123456789012345678901234567890123"}, 0, "");
+        Test.assertEqual((long["reason"] as String).length(), 60);
+        Sync.resetOutbox();
         return true;
     }
 

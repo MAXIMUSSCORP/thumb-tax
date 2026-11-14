@@ -10,6 +10,24 @@ module LedgerTest {
         Application.Storage.deleteValue("lg_hist");
         Application.Storage.deleteValue("lg_day");
         Ledger.reset();
+        Sync.resetOutbox();
+        Application.Storage.deleteValue(SYNC_KEY);
+    }
+
+    (:test)
+    function serverBalanceNoHistory(logger as Logger) as Boolean {
+        Ledger.reset();
+        Sync.resetOutbox();
+        Ledger.applyServerBalance(-77);
+        Test.assertEqual(Ledger.balance(), -77);
+        Test.assertEqual(Ledger.history().size(), 0);
+        Test.assertEqual(Sync._unsent, 0);
+        Ledger.chargeScroll(3, 12, false);
+        Ledger.bonus(30, "calm bonus");
+        Test.assertEqual(Sync._unsent, 27);
+        Test.assertEqual(Sync._unsentReason, "watch activity");
+        cleanup();
+        return true;
     }
 
     (:test)

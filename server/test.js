@@ -1,4 +1,4 @@
-// Contract v1 tests: spawn the real server and talk to it over HTTP.
+// Contract v2 tests: spawn the real server and talk to it over HTTP.
 const { test, before, after } = require("node:test");
 const assert = require("node:assert");
 const { spawn } = require("node:child_process");
@@ -41,6 +41,12 @@ async function stop() {
 const H = { "x-api-key": KEY, "content-type": "application/json" };
 const post = (p, body) => fetch(BASE + p, { method: "POST", headers: H, body: JSON.stringify(body) });
 const get = async () => (await fetch(BASE + "/state", { headers: H })).json();
+const led = (b) => post("/ledger", { reason: "t", source: "panel", ...b });
+async function zero() {
+  const s = await get();
+  if (s.balanceSec) await led({ deltaSec: -s.balanceSec });
+  await post("/state", { pendingChargeSec: 0 });
+}
 const today = () => {
   const d = new Date();
   const z = (n) => String(n).padStart(2, "0");
@@ -110,26 +116,138 @@ test("LOCAL_NO_KEY=0 requires the key even on loopback", async () => {
   }
 });
 
-test("GET /state has all 9 keys", async () => {
+test("GET /state has all 12 keys", async () => {
   const s = await get();
   assert.deepStrictEqual(Object.keys(s).sort(), [
-    "activity", "creditMinutes", "source", "taxMinutes", "updatedAt", "usageDay", "usageEpoch", "usageUpdatedAt", "usedMinutesToday",
+    "activity", "balanceSec", "creditMinutes", "history", "pendingChargeSec", "source", "taxMinutes", "updatedAt", "usageDay", "usageEpoch", "usageUpdatedAt", "usedMinutesToday",
   ]);
   assert.strictEqual(s.usageDay, today());
 });
 
-test("POST /state round trip, clear activity, empty body", async () => {
-  let r = await post("/state", { taxMinutes: 12.4, creditMinutes: "7", activity: "Walk", source: "watch" });
+test("POST /state: activity and pendingChargeSec, ignores taxMinutes, 400 otherwise", async () => {
+  await zero();
+  let r = await post("/state", { activity: "Walk", pendingChargeSec: 90.4, taxMinutes: 50, creditMinutes: 9, source: "watch" });
   assert.strictEqual(r.status, 200);
   let s = await r.json();
-  assert.strictEqual(s.taxMinutes, 12);
-  assert.strictEqual(s.creditMinutes, 7);
   assert.strictEqual(s.activity, "Walk");
+  assert.strictEqual(s.pendingChargeSec, 90);
   assert.strictEqual(s.source, "watch");
+  assert.strictEqual(s.balanceSec, 0);
+  assert.strictEqual(s.taxMinutes, 2); // ceil(90/60), not 50
+  assert.strictEqual(s.creditMinutes, 0);
   r = await post("/state", { activity: "" });
   assert.strictEqual((await r.json()).activity, null);
-  assert.strictEqual((await get()).creditMinutes, 7);
+  assert.strictEqual((await get()).pendingChargeSec, 90);
   assert.strictEqual((await post("/state", {})).status, 400);
+  assert.strictEqual((await post("/state", { taxMinutes: 5 })).status, 400);
+  assert.strictEqual((await get()).taxMinutes, 2);
+  await zero();
+});
+
+test("derived tax and credit include pendingChargeSec", async () => {
+  await zero();
+  let s = await (await led({ deltaSec: -100 })).json();
+  assert.strictEqual(s.balanceSec, -100);
+  assert.strictEqual(s.taxMinutes, 2);
+  assert.strictEqual(s.creditMinutes, 0);
+  s = await (await post("/state", { pendingChargeSec: 30 })).json();
+  assert.strictEqual(s.taxMinutes, 3); // ceil(130/60)
+  s = await (await led({ deltaSec: 500 })).json();
+  assert.strictEqual(s.balanceSec, 400);
+  assert.strictEqual(s.taxMinutes, 0);
+  assert.strictEqual(s.creditMinutes, 6); // floor(370/60)
+  s = await (await post("/state", { pendingChargeSec: 0 })).json();
+  assert.strictEqual(s.creditMinutes, 6);
+  await zero();
+});
+
+test("ledger: panel delta applies and shows in history", async () => {
+  await zero();
+  const r = await led({ deltaSec: 300, reason: "  panel +5 min " });
+  assert.strictEqual(r.status, 200);
+  const s = await r.json();
+  assert.strictEqual(s.applied, true);
+  assert.strictEqual(s.lastEventId, null);
+  assert.strictEqual(s.balanceSec, 300);
+  assert.strictEqual(s.creditMinutes, 5);
+  const h = s.history[0];
+  assert.strictEqual(h.deltaSec, 300);
+  assert.strictEqual(h.reason, "panel +5 min");
+  assert.strictEqual(h.source, "panel");
+  assert.ok(!Number.isNaN(Date.parse(h.t)));
+  const r2 = await (await led({ deltaSec: 300 })).json(); // no session: always applies
+  assert.strictEqual(r2.balanceSec, 600);
+  const r3 = await (await led({ deltaSec: -60, activity: "Run", pendingChargeSec: 20 })).json();
+  assert.strictEqual(r3.activity, "Run");
+  assert.strictEqual(r3.pendingChargeSec, 20);
+  await zero();
+});
+
+test("ledger: watch idempotency by session and eventId", async () => {
+  await zero();
+  const w = (eventId, session = "s1") => led({ deltaSec: 60, source: "watch", session, eventId });
+  let s = await (await w(1)).json();
+  assert.strictEqual(s.applied, true);
+  assert.strictEqual(s.lastEventId, 1);
+  const base = s.balanceSec;
+  s = await (await w(1)).json();
+  assert.strictEqual(s.applied, false);
+  assert.strictEqual(s.balanceSec, base);
+  assert.strictEqual(s.lastEventId, 1);
+  s = await (await w(2)).json();
+  assert.strictEqual(s.applied, true);
+  assert.strictEqual(s.balanceSec, base + 60);
+  s = await (await w(1)).json(); // older than 2
+  assert.strictEqual(s.applied, false);
+  assert.strictEqual(s.lastEventId, 2);
+  s = await (await w(1, "s2")).json(); // new session resets
+  assert.strictEqual(s.applied, true);
+  assert.strictEqual(s.lastEventId, 1);
+  assert.strictEqual(s.balanceSec, base + 120);
+  s = await (await led({ deltaSec: 60, source: "ios", session: "s1", eventId: 1 })).json(); // per source
+  assert.strictEqual(s.applied, true);
+  await zero();
+});
+
+test("ledger: validation 400s", async () => {
+  const bad = [
+    { deltaSec: 0 }, { deltaSec: 86401 }, { deltaSec: -86401 }, { deltaSec: 1.5 }, { deltaSec: "60" }, { deltaSec: null }, {},
+    { deltaSec: 60, reason: "" }, { deltaSec: 60, reason: "   " }, { deltaSec: 60, reason: "x".repeat(61) }, { deltaSec: 60, reason: 5 },
+    { deltaSec: 60, source: "tv" }, { deltaSec: 60, source: undefined },
+  ];
+  for (const b of bad) {
+    const before = (await get()).balanceSec;
+    const r = await post("/ledger", { reason: "t", source: "panel", ...b });
+    assert.strictEqual(r.status, 400, JSON.stringify(b));
+    assert.strictEqual((await get()).balanceSec, before);
+  }
+  assert.strictEqual((await led({ deltaSec: 86400 })).status, 200);
+  assert.strictEqual((await led({ deltaSec: -86400 })).status, 200);
+  assert.strictEqual((await led({ reason: "x".repeat(60), deltaSec: 1 })).status, 200);
+  await zero();
+});
+
+test("ledger: history stored 20, returned 10, newest first", async () => {
+  await zero();
+  for (let i = 1; i <= 25; i++) await led({ deltaSec: i, reason: "n" + i });
+  const s = await get();
+  assert.strictEqual(s.history.length, 10);
+  assert.strictEqual(s.history[0].reason, "n25");
+  assert.strictEqual(s.history[9].reason, "n16");
+  const saved = JSON.parse(fs.readFileSync(DATA, "utf8"));
+  assert.strictEqual(saved.history.length, 20);
+  assert.strictEqual(saved.taxMinutes, undefined);
+  await zero();
+});
+
+test("ledger: needs the key through the tunnel", async () => {
+  const R = { "cf-connecting-ip": "1.2.3.4", "content-type": "application/json" };
+  const body = JSON.stringify({ deltaSec: 60, reason: "t", source: "panel" });
+  const before = (await get()).balanceSec;
+  assert.strictEqual((await fetch(BASE + "/ledger", { method: "POST", headers: R, body })).status, 401);
+  assert.strictEqual((await get()).balanceSec, before);
+  assert.strictEqual((await fetch(BASE + "/ledger", { method: "POST", headers: { ...R, "x-api-key": KEY }, body })).status, 200);
+  await zero();
 });
 
 test("usage: increase, decrease, reset", async () => {
@@ -178,13 +296,20 @@ test("OPTIONS is 204 with CORS, before auth", async () => {
 });
 
 test("state survives restart", async () => {
-  await post("/state", { taxMinutes: 33, creditMinutes: 4, activity: "Stairs" });
+  await zero();
+  await led({ deltaSec: 600, source: "watch", session: "r1", eventId: 5 });
+  await post("/state", { activity: "Stairs", pendingChargeSec: 60 });
   await stop();
   await start();
   const s = await get();
-  assert.strictEqual(s.taxMinutes, 33);
-  assert.strictEqual(s.creditMinutes, 4);
+  assert.strictEqual(s.balanceSec, 600);
+  assert.strictEqual(s.pendingChargeSec, 60);
+  assert.strictEqual(s.creditMinutes, 9);
   assert.strictEqual(s.activity, "Stairs");
+  assert.strictEqual(s.history[0].deltaSec, 600);
+  const r = await (await led({ deltaSec: 600, source: "watch", session: "r1", eventId: 5 })).json();
+  assert.strictEqual(r.applied, false);
+  await zero();
 });
 
 test("malformed Host header does not crash the server", async () => {
@@ -227,7 +352,7 @@ test("usageEpoch: String, stable on increase, changed by reset, kept on new day"
   assert.notStrictEqual(e1, e0);
   const r = await post("/usage", { usedMinutesToday: 9, day: shift(1) });
   assert.strictEqual((await r.json()).usageEpoch, e1);
-  assert.strictEqual((await (await post("/state", { taxMinutes: 1 })).json()).usageEpoch, e1);
+  assert.strictEqual((await (await led({ deltaSec: 1 })).json()).usageEpoch, e1);
   assert.strictEqual((await get()).usageEpoch, e1);
 });
 
@@ -255,6 +380,29 @@ test("usageEpoch: added when saved state lacks it", async () => {
   await stop();
   await start();
   assert.strictEqual((await get()).usageEpoch, e);
+});
+
+test("migration: old state without balanceSec", async () => {
+  await stop();
+  const s = JSON.parse(fs.readFileSync(DATA, "utf8"));
+  delete s.balanceSec;
+  delete s.pendingChargeSec;
+  delete s.history;
+  delete s.ledgerSessions;
+  s.taxMinutes = 10;
+  s.creditMinutes = 3;
+  fs.writeFileSync(DATA, JSON.stringify(s));
+  await start();
+  const g = await get();
+  assert.strictEqual(g.balanceSec, -420);
+  assert.strictEqual(g.taxMinutes, 7);
+  assert.strictEqual(g.creditMinutes, 0);
+  assert.strictEqual(g.pendingChargeSec, 0);
+  assert.deepStrictEqual(g.history, []);
+  await stop();
+  await start();
+  assert.strictEqual((await get()).balanceSec, -420); // migrated once, not again
+  await zero();
 });
 
 // Railway startup output: separate child on its own port and temp DATA_FILE.

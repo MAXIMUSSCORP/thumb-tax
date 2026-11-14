@@ -5,6 +5,7 @@ import Toybox.Communications;
 import Toybox.Lang;
 import Toybox.Math;
 import Toybox.System;
+import Toybox.Time;
 
 // Real devices require HTTPS and route requests through the paired phone;
 // only the simulator can reach http://127.0.0.1 directly.
@@ -23,6 +24,9 @@ const EARN_MORE_MIN = 10;
 const MAX_TEXT = 120;
 const IN_FLIGHT_TIMEOUT_MS = 10000;
 const SYNC_KEY = "sy";
+const MAX_EVENT_SEC = 86400;
+const MAX_REASON = 60;
+const MIXED_REASON = "watch activity";
 
 module Sync {
     var _on as Boolean = false;
@@ -43,6 +47,105 @@ module Sync {
     var _lastPosted as String = "";
     var _lastWasPost as Boolean = false;
     var _sending as String = "";
+    // Outbox: the server is the bank, so balance changes travel as events, each applied once per (session, id).
+    var _session as String = "";
+    var _nextEventId as Number = 1;
+    var _unsent as Number = 0;
+    var _unsentReason as String = "";
+    var _inflight as Dictionary? = null;
+    var _reqLedger as Boolean = false;
+
+    function base36(n as Number) as String {
+        var digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+        var v = n < 0 ? -n : n;
+        if (v == 0) {
+            return "0";
+        }
+        var out = "";
+        while (v > 0) {
+            var r = v % 36;
+            out = digits.substring(r, r + 1) + out;
+            v = v / 36;
+        }
+        return out;
+    }
+
+    function ensureSession() as String {
+        if (_session.equals("")) {
+            _session = base36(Time.now().value()) + "-" + base36(System.getTimer());
+        }
+        return _session;
+    }
+
+    function resetOutbox() as Void {
+        _session = "";
+        _nextEventId = 1;
+        _unsent = 0;
+        _unsentReason = "";
+        _inflight = null;
+        _reqLedger = false;
+    }
+
+    // Every local balance change lands here; the first reason wins, mixed reasons become one label.
+    function noteDelta(sec as Number, reason as String) as Void {
+        if (sec == 0) {
+            return;
+        }
+        if (_unsent == 0) {
+            _unsentReason = reason;
+        } else if (!reason.equals(_unsentReason)) {
+            _unsentReason = MIXED_REASON;
+        }
+        _unsent += sec;
+    }
+
+    // Turns the accumulated delta into the next event unless one is already awaiting its ack.
+    function startEvent() as Void {
+        if (_inflight != null || _unsent == 0) {
+            return;
+        }
+        var d = _unsent;
+        if (d > MAX_EVENT_SEC) {
+            d = MAX_EVENT_SEC;
+        } else if (d < -MAX_EVENT_SEC) {
+            d = -MAX_EVENT_SEC;
+        }
+        _inflight = {:id => _nextEventId, :delta => d, :reason => _unsentReason};
+        _nextEventId += 1;
+        _unsent -= d;
+        if (_unsent == 0) {
+            _unsentReason = "";
+        }
+        save();
+    }
+
+    function ackEvent() as Void {
+        _inflight = null;
+        save();
+    }
+
+    function eventBody(ev as Dictionary, pendingChargeSec as Number, activity as String) as Dictionary {
+        var r = ev[:reason] as String;
+        if (r.length() > MAX_REASON) {
+            r = r.substring(0, MAX_REASON) as String;
+        } else if (r.length() == 0) {
+            r = MIXED_REASON;
+        }
+        return {
+            "deltaSec" => ev[:delta] as Number,
+            "reason" => r,
+            "source" => "watch",
+            "session" => ensureSession(),
+            "eventId" => ev[:id] as Number,
+            "activity" => activity,
+            "pendingChargeSec" => pendingChargeSec
+        };
+    }
+
+    // The watch mirrors the server: its balance plus whatever the server has not seen yet.
+    function reconcile(serverBal as Number, inflightDelta as Number, unsent as Number) as Number {
+        return serverBal + inflightDelta + unsent;
+    }
 
     function usageDelta(seenDay as String?, seen as Number, seenEpoch as String?, day as String, used as Number, epoch as String?) as Array<Number> {
         if (seenDay == null || (epoch != null && seenEpoch != null && !epoch.equals(seenEpoch))) {
@@ -184,32 +287,53 @@ module Sync {
 
     function payload(balanceSec as Number, pendingSec as Number, mult as Number) as Dictionary {
         var eff = effBalance(balanceSec, pendingSec, mult);
-        var debt = eff < 0 ? -eff : 0;
         return {
-            "taxMinutes" => (debt + 59) / 60,
-            "creditMinutes" => (eff > 0 ? eff : 0) / 60,
-            "activity" => suggestion(debt),
-            "source" => "watch"
+            "activity" => suggestion(eff < 0 ? -eff : 0),
+            "pendingChargeSec" => pendingSec * mult
         };
+    }
+
+    // Loads a stored "sy" value; older 3 and 4 element shapes keep working.
+    function restore(v as Object?) as Void {
+        if (!(v instanceof Array) || v.size() < 3) {
+            return;
+        }
+        var d = v[0];
+        var s = v[1];
+        var p = v[2];
+        if (!((d == null || d instanceof String) && s instanceof Number && p instanceof Number)) {
+            return;
+        }
+        _seenDay = d;
+        _seen = s;
+        _pendingSec = p;
+        var e = v.size() >= 4 ? v[3] : null;
+        _seenEpoch = e instanceof String ? e : null;
+        if (v.size() < 11) {
+            return;
+        }
+        var ses = v[4];
+        var nid = v[5];
+        var uns = v[6];
+        var unr = v[7];
+        if (ses instanceof String && nid instanceof Number && nid >= 1 && uns instanceof Number && unr instanceof String) {
+            _session = ses;
+            _nextEventId = nid;
+            _unsent = uns;
+            _unsentReason = unr;
+            var iid = v[8];
+            var idl = v[9];
+            var irs = v[10];
+            _inflight = (iid instanceof Number && idl instanceof Number && irs instanceof String) ? {:id => iid, :delta => idl, :reason => irs} : null;
+        }
     }
 
     function start() as Void {
         if (_on) {
             return;
         }
-        var v = Application.Storage.getValue(SYNC_KEY);
-        if (v instanceof Array && v.size() >= 3) {
-            var d = v[0];
-            var s = v[1];
-            var p = v[2];
-            if ((d == null || d instanceof String) && s instanceof Number && p instanceof Number) {
-                _seenDay = d;
-                _seen = s;
-                _pendingSec = p;
-                var e = v.size() >= 4 ? v[3] : null;
-                _seenEpoch = e instanceof String ? e : null;
-            }
-        }
+        restore(Application.Storage.getValue(SYNC_KEY));
+        ensureSession();
         _on = true;
         _lastPumpMs = System.getTimer();
         pump();
@@ -235,7 +359,9 @@ module Sync {
     }
 
     function save() as Void {
-        Application.Storage.setValue(SYNC_KEY, [_seenDay, _seen, _pendingSec, _seenEpoch]);
+        var inf = _inflight;
+        Application.Storage.setValue(SYNC_KEY, [_seenDay, _seen, _pendingSec, _seenEpoch, _session, _nextEventId, _unsent, _unsentReason,
+            inf == null ? null : inf[:id], inf == null ? null : inf[:delta], inf == null ? null : inf[:reason]]);
     }
 
     function headersFor(apiKey as String) as Dictionary {
@@ -259,9 +385,20 @@ module Sync {
             fail(-408);
         }
         var body = payload(Ledger.balance(), _pendingSec, Ledger.multiplier(Engine.hour(), Engine.inBed()));
-        var str = body.toString();
-        var due = !str.equals(_lastPosted) || now - _lastPostMs >= HEARTBEAT_MS;
-        var post = due && !_lastWasPost;
+        var str = (body["activity"] as String) + "|" + (body["pendingChargeSec"] as Number);
+        startEvent();
+        var ev = _inflight;
+        var post = true;
+        var path = "/ledger";
+        if (ev != null) {
+            body = eventBody(ev, body["pendingChargeSec"] as Number, body["activity"] as String);
+        } else {
+            path = "/state";
+            var due = !str.equals(_lastPosted) || now - _lastPostMs >= HEARTBEAT_MS;
+            post = due && !_lastWasPost;
+            _lastWasPost = post;
+        }
+        _reqLedger = ev != null;
         var options = {
             :method => post ? Communications.HTTP_REQUEST_METHOD_POST : Communications.HTTP_REQUEST_METHOD_GET,
             :headers => headersFor(API_KEY),
@@ -269,10 +406,9 @@ module Sync {
         };
         _inFlight = true;
         _inFlightSince = now;
-        _lastWasPost = post;
         _sending = str;
         try {
-            Communications.makeWebRequest(SERVER_BASE + "/state", post ? body : null, options, new Lang.Method(Sync, :onResponse));
+            Communications.makeWebRequest(SERVER_BASE + path, post ? body : null, options, new Lang.Method(Sync, :onResponse));
         } catch (e) {
             _inFlight = false;
             _online = false;
@@ -292,9 +428,19 @@ module Sync {
         var now = System.getTimer();
         _online = true;
         _lastOkMs = now;
-        if (_lastWasPost) {
+        if (_reqLedger) {
+            ackEvent();
+        } else if (_lastWasPost) {
             _lastPosted = _sending;
             _lastPostMs = now;
+        }
+        var bal = data["balanceSec"];
+        if (bal instanceof Number) {
+            var inf = _inflight;
+            var local = reconcile(bal, inf == null ? 0 : inf[:delta] as Number, _unsent);
+            if (local != Ledger.balance()) {
+                Ledger.applyServerBalance(local);
+            }
         }
         var used = data["usedMinutesToday"];
         var day = data["usageDay"];
