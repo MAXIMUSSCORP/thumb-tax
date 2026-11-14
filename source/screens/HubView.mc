@@ -1,4 +1,4 @@
-// Main menu, opened from the mascot with START or MENU: earn time, live meter, trends, demo feed.
+// Main menu, opened from the mascot with START or MENU: earn time, live meter, badges, trends, demo.
 import Toybox.Graphics;
 import Toybox.Lang;
 import Toybox.WatchUi;
@@ -37,17 +37,24 @@ class HubView extends WatchUi.View {
         } else if (m == false) {
             feed = "forced: idle";
         }
+        var streak = st[:streak];
+        var unseen = st[:unseenBadges];
+        var badges = "streak " + ((streak instanceof Number) ? streak : "--");
+        if (unseen instanceof Number && (unseen as Number) > 0) {
+            badges += " · " + unseen + " new";
+        }
         return [
             {:title => "Earn time", :sub => Catalog.all().size() + " activities"},
             {:title => "Scroll meter", :sub => "bank " + balText},
+            {:title => "Badges", :sub => badges},
             {:title => "Trends", :sub => "charts and sensors"},
-            {:title => "Demo feed", :sub => feed}
+            {:title => "Demo", :sub => feed}
         ] as Array<Dictionary>;
     }
 
     public function move(dir as Number) as Void {
         var n = _focus + dir;
-        if (n >= 0 && n < 4) {
+        if (n >= 0 && n < 5) {
             _focus = n;
             WatchUi.requestUpdate();
         }
@@ -60,6 +67,9 @@ class HubView extends WatchUi.View {
         } else if (_focus == 1) {
             ScrollWatch.open(false);
         } else if (_focus == 2) {
+            var b = new BadgeListView();
+            WatchUi.pushView(b, new BadgeListDelegate(b), WatchUi.SLIDE_LEFT);
+        } else if (_focus == 3) {
             var t = new ThumbTaxView();
             WatchUi.pushView(t, new ThumbTaxDelegate(t), WatchUi.SLIDE_LEFT);
         } else {

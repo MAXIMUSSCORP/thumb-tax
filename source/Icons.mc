@@ -1,8 +1,41 @@
 // Small sensor icons drawn from primitives, centred on (x, y) and roughly 2r across.
 import Toybox.Graphics;
 import Toybox.Lang;
+import Toybox.Math;
 
 module Icons {
+    // Badge medal: two ribbon tails and a disc. Earned = solid white disc with a black ring and star;
+    // locked = grey outline only.
+    function medal(dc as Dc, x as Number, y as Number, r as Number, earned as Boolean) as Void {
+        var t = r / 2;
+        dc.setColor(earned ? Graphics.COLOR_LT_GRAY : Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.fillPolygon([[x - r, y - r - t], [x - r / 3, y - r - t], [x, y - r / 2], [x - r / 3, y]]);
+        dc.fillPolygon([[x + r, y - r - t], [x + r / 3, y - r - t], [x, y - r / 2], [x + r / 3, y]]);
+        if (earned) {
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.fillCircle(x, y, r);
+            dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawCircle(x, y, r - 4);
+            var pts = [] as Array<[Numeric, Numeric]>;
+            for (var i = 0; i < 10; i++) {
+                var a = Math.toRadians(-90 + i * 36);
+                var rr = (i % 2 == 0) ? r * 0.55 : r * 0.23;
+                pts.add([x + (Math.cos(a) * rr).toNumber(), y + (Math.sin(a) * rr).toNumber()]);
+            }
+            dc.fillPolygon(pts);
+        } else {
+            // Black disc first so the ribbon does not show through the hollow medal.
+            dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
+            dc.fillCircle(x, y, r);
+            dc.setColor(Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawCircle(x, y, r);
+            dc.drawCircle(x, y, r - 4);
+        }
+        dc.setPenWidth(1);
+    }
+
     // Heart rate.
     function heart(dc as Dc, x as Number, y as Number, r as Number, color as Number) as Void {
         dc.setColor(color, Graphics.COLOR_TRANSPARENT);

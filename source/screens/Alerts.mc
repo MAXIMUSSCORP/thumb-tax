@@ -1,6 +1,6 @@
 // Watches Engine.state() once a second (from UiClock) and raises banner notifications:
 //   TIME ADDED  - the bank went up (an activity or bonus was credited)
-//   TIME'S UP   - the bank crossed from zero or positive into overdraft
+//   TIME'S UP   - the bank crossed from zero or positive into overdraft (silent: the Engine buzzes for overdraft)
 //   TIME OUT    - scrolling during night hours (bedtime, tax doubles); once per scroll session
 import Toybox.Lang;
 
@@ -18,7 +18,8 @@ module Alerts {
                 if (bal > prev) {
                     Notify.show("TIME ADDED", ListUi.signedTime(bal - prev) + " to your bank", true);
                 } else if (prev >= 0 && bal < 0) {
-                    Notify.show("TIME'S UP", "bank empty, now in overdraft", true);
+                    // No buzz here: the Engine already vibrates on overdraft.
+                    Notify.show("TIME'S UP", "bank empty, now in overdraft", false);
                 }
             }
             _prev = bal;

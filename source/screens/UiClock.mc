@@ -1,7 +1,8 @@
 // One 1 Hz heartbeat for the whole UI, driven by the Engine's own tick (Engine.onChange).
-// Connect IQ allows only 3 timers at once and the backend already uses them (Engine, ScrollSource,
-// and Activities during a session), so screens must not start their own 1 s timers. Instead the
-// visible screen registers here on onShow and unregisters on onHide.
+// Connect IQ allows only 3 timers at once and the backend already uses them (Engine, Sync,
+// and Activities during a session), so screens must not start their own 1 s timers: a 4th timer
+// crashes with "Too Many Timers". Instead the visible screen registers here on onShow and
+// unregisters on onHide. This is the only user of Engine.onChange; the backend registers nothing there.
 import Toybox.Lang;
 
 module UiClock {
@@ -36,6 +37,8 @@ module UiClock {
         var st = Engine.state();
         Alerts.check(st);
         ScrollWatch.check(st);
+        BadgeWatch.check(st);
+        Notify.setSyncErr(st[:syncErr]);
         Notify.tick();
         var cb = _listener;
         if (cb != null) {

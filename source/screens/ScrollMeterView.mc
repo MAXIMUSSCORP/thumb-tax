@@ -134,20 +134,30 @@ class ScrollMeterView extends WatchUi.View {
         var balText = (_st[:balanceSec] == null) ? "--" : ListUi.signedTime(bal);
         dc.drawText(cx, (h * 0.715).toNumber(), Graphics.FONT_XTINY, "bank " + balText, c);
 
-        // State line.
+        // State line: in overdraft, the payoff suggestion ("12 push-ups or a 3 min walk clears it").
         var note = "";
-        if (!scrolling) {
+        var sug = _st[:suggestion];
+        if (overdrawn && sug instanceof String && !(sug as String).equals("")) {
+            note = sug as String;
+        } else if (!scrolling) {
             note = "session closed";
         } else if (overdrawn) {
             note = "put the phone down";
         }
         if (!note.equals("")) {
             dc.setColor(soft, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(cx, (h * 0.8).toNumber(), Graphics.FONT_XTINY, note, c);
+            var lines = ListUi.wrap(dc, note, Graphics.FONT_XTINY, (w * 0.7).toNumber());
+            var y0 = (h * ((lines.size() > 1) ? 0.77 : 0.8)).toNumber();
+            for (var i = 0; i < lines.size(); i++) {
+                dc.drawText(cx, y0 + i * 16, Graphics.FONT_XTINY, lines[i], c);
+            }
         }
 
-        dc.setColor(soft, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.9).toNumber(), Graphics.FONT_XTINY, "BACK hide", c);
+        // The footer only fits when the state line is a single line.
+        if (note.equals("") || dc.getTextWidthInPixels(note, Graphics.FONT_XTINY) <= (w * 0.7).toNumber()) {
+            dc.setColor(soft, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx, (h * 0.9).toNumber(), Graphics.FONT_XTINY, "BACK hide", c);
+        }
         Notify.draw(dc);
     }
 

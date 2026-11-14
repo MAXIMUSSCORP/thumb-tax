@@ -1,12 +1,16 @@
-// Demo control for the simulator: where "is the user scrolling?" comes from.
-// Phone server = follow the phone feed (ScrollSource.setManual(null)); the other two force it on or off.
-// The title shows whether the phone feed is connected, from Engine.state()[:online].
+// Demo menu for judging, on the simulator or the watch.
+//   Phone server / Force scrolling / Force idle: Sync.setManual(null / true / false), where scrolling comes from.
+//   Seed badge week: Badges.seedDemo() (six clean days already banked).
+//   Close today: Badges.demoCloseToday(); after seeding this earns Perfect Week live and the NEW BADGE screen opens.
+// The title shows whether the phone feed is connected, or the sync error when there is one.
 import Toybox.Graphics;
 import Toybox.Lang;
 import Toybox.WatchUi;
 
 class ScrollFeedView extends WatchUi.View {
-    // Index 0 = follow server (null), 1 = force scrolling (true), 2 = force idle (false).
+    private const ROWS = 5;
+
+    // 0 = follow server, 1 = force scrolling, 2 = force idle, 3 = seed badges, 4 = close today.
     private var _focus as Number = 0;
 
     public function initialize() {
@@ -39,7 +43,7 @@ class ScrollFeedView extends WatchUi.View {
 
     public function move(dir as Number) as Void {
         var n = _focus + dir;
-        if (n >= 0 && n <= 2) {
+        if (n >= 0 && n < ROWS) {
             _focus = n;
             WatchUi.requestUpdate();
         }
@@ -47,11 +51,17 @@ class ScrollFeedView extends WatchUi.View {
 
     public function select() as Void {
         if (_focus == 1) {
-            ScrollSource.setManual(true);
+            Sync.setManual(true);
         } else if (_focus == 2) {
-            ScrollSource.setManual(false);
+            Sync.setManual(false);
+        } else if (_focus == 3) {
+            Badges.seedDemo();
+            Notify.show("BADGE WEEK SEEDED", "6 clean days: close today next", false);
+        } else if (_focus == 4) {
+            Badges.demoCloseToday();
+            Notify.show("DAY CLOSED", "checking badges...", false);
         } else {
-            ScrollSource.setManual(null);
+            Sync.setManual(null);
         }
         WatchUi.requestUpdate();
     }
@@ -60,14 +70,21 @@ class ScrollFeedView extends WatchUi.View {
         var st = Engine.state();
         var online = st[:online] == true;
         var scrolling = st[:scrolling] == true;
+        var err = st[:syncErr];
         var cur = currentIndex();
+        var streak = st[:streak];
         var rows = [
             {:title => "Phone server", :sub => online ? "feed connected" : "feed offline", :mark => cur == 0},
             {:title => "Force scrolling", :sub => "demo: charge tax now", :mark => cur == 1},
-            {:title => "Force idle", :sub => "demo: no scrolling", :mark => cur == 2}
+            {:title => "Force idle", :sub => "demo: no scrolling", :mark => cur == 2},
+            {:title => "Seed badge week", :sub => "6 clean days banked"},
+            {:title => "Close today", :sub => "streak " + ((streak instanceof Number) ? streak : "--") + " · earns badges"}
         ] as Array<Dictionary>;
-        // Title doubles as the live status: feed connection and whether scrolling is being charged.
-        var status = (online ? "ONLINE" : "OFFLINE") + " · " + (scrolling ? "scrolling" : "idle");
+
+        // Title doubles as the live status: the sync error if any, else connection and scrolling state.
+        var status = (err instanceof String && !(err as String).equals(""))
+            ? err as String
+            : (online ? "ONLINE" : "OFFLINE") + " · " + (scrolling ? "scrolling" : "idle");
         ListUi.draw(dc, status, rows, _focus);
 
         // Connection dot before the title: filled = connected, hollow = offline.
