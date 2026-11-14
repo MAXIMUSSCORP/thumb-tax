@@ -66,11 +66,48 @@ test("health needs no key", async () => {
 });
 
 test("state without key is 401", async () => {
-  const r = await fetch(BASE + "/state");
+  const R = { "cf-connecting-ip": "1.2.3.4" }; // remote path (tunnel)
+  const r = await fetch(BASE + "/state", { headers: R });
   assert.strictEqual(r.status, 401);
   assert.deepStrictEqual(await r.json(), { error: "bad or missing API key" });
-  assert.strictEqual((await fetch(BASE + "/usage", { method: "POST" })).status, 401);
-  assert.strictEqual((await fetch(BASE + "/state?key=t")).status, 200);
+  assert.strictEqual((await fetch(BASE + "/usage", { method: "POST", headers: R })).status, 401);
+  assert.strictEqual((await fetch(BASE + "/state?key=t", { headers: R })).status, 200);
+});
+
+test("local exemption: loopback without forwarding headers needs no key", async () => {
+  assert.strictEqual((await fetch(BASE + "/state")).status, 200);
+});
+
+test("local exemption: any forwarding header forces the key", async () => {
+  for (const h of ["cf-connecting-ip", "x-forwarded-for", "cf-ray", "x-real-ip", "forwarded"]) {
+    assert.strictEqual((await fetch(BASE + "/state", { headers: { [h]: "1.2.3.4" } })).status, 401, h);
+  }
+  const ok = await fetch(BASE + "/state", { headers: { "cf-connecting-ip": "1.2.3.4", "x-api-key": KEY } });
+  assert.strictEqual(ok.status, 200);
+});
+
+test("LOCAL_NO_KEY=0 requires the key even on loopback", async () => {
+  const port = 3997;
+  const data = path.join(os.tmpdir(), `wl-lnk-${Math.random().toString(36).slice(2)}.json`);
+  const c = spawn(process.execPath, ["server.js"], {
+    cwd: __dirname,
+    env: { ...process.env, PORT: String(port), DATA_FILE: data, API_KEY: KEY, LOCAL_NO_KEY: "0" },
+    stdio: "ignore",
+  });
+  const closed = new Promise((r) => c.once("close", r));
+  try {
+    const b = `http://127.0.0.1:${port}`;
+    for (let i = 0; i < 50; i++) {
+      try { if ((await fetch(b + "/health")).ok) break; } catch (_) {}
+      await sleep(100);
+    }
+    assert.strictEqual((await fetch(b + "/state")).status, 401);
+    assert.strictEqual((await fetch(b + "/state", { headers: { "x-api-key": KEY } })).status, 200);
+  } finally {
+    c.kill();
+    await closed;
+    fs.rmSync(data, { force: true });
+  }
 });
 
 test("GET /state has all 9 keys", async () => {

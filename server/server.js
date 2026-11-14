@@ -8,6 +8,7 @@
 //   GET  /        -> control panel
 //
 // Env: PORT (default 48217), API_KEY (optional; header "x-api-key" or "?key=" on /state and /usage),
+// LOCAL_NO_KEY (default 1; 0 = loopback requests need the key too),
 // DATA_FILE (default ./state.json, or /data/state.json on Railway when a volume is mounted).
 
 const http = require("http");
@@ -17,6 +18,7 @@ const path = require("path");
 
 const PORT = process.env.PORT || 48217;
 const API_KEY = process.env.API_KEY || "";
+const LOCAL_NO_KEY = process.env.LOCAL_NO_KEY !== "0"; // loopback requests skip the key; "0" turns that off
 const RAILWAY = !!process.env.RAILWAY_ENVIRONMENT;
 // On Railway, use a mounted volume at /data if present; otherwise state is ephemeral.
 const DATA_FILE =
@@ -134,8 +136,16 @@ function send(res, code, body, type = "application/json") {
   res.end(code === 204 ? undefined : type === "application/json" ? JSON.stringify(body) : body);
 }
 
+// cloudflared reaches us over loopback too, but always adds one of these headers.
+const PROXY_HEADERS = ["cf-connecting-ip", "cf-ray", "x-forwarded-for", "x-real-ip", "forwarded"];
+function isLocal(req) {
+  const a = req.socket.remoteAddress;
+  return (a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1") && !PROXY_HEADERS.some((h) => h in req.headers);
+}
+
 function authorized(req, url) {
   if (!API_KEY) return true;
+  if (LOCAL_NO_KEY && isLocal(req)) return true;
   return req.headers["x-api-key"] === API_KEY || url.searchParams.get("key") === API_KEY;
 }
 

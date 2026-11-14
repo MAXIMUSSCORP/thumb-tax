@@ -34,6 +34,10 @@ curl.exe -X POST http://127.0.0.1:48217/state -H "x-api-key: KEY" -H "content-ty
 
 Leave out the x-api-key header if you did not set API_KEY.
 
+## Local panel
+
+Open http://localhost:48217 on the server's own machine and use the panel with the key field empty. A request counts as local only if it comes from loopback and carries none of `cf-connecting-ip`, `cf-ray`, `x-forwarded-for`, `x-real-ip`, `forwarded`, so requests through the Cloudflare tunnel still need the key. Requests from other devices on the LAN are not loopback, so they still need the key too. Set `LOCAL_NO_KEY=0` to turn this off.
+
 ## Networking
 
 On the first run Windows asks about the firewall. Allow Private networks, or the phone cannot reach the server. For the same Wi-Fi case, open the printed LAN URL on the iPhone.
