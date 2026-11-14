@@ -8,7 +8,7 @@
 //   GET  /        -> control panel
 //
 // Env: PORT (default 48217), API_KEY (optional; header "x-api-key" or "?key=" on /state and /usage),
-// DATA_FILE (default ./state.json).
+// DATA_FILE (default ./state.json, or /data/state.json on Railway when a volume is mounted).
 
 const http = require("http");
 const fs = require("fs");
@@ -17,7 +17,10 @@ const path = require("path");
 
 const PORT = process.env.PORT || 48217;
 const API_KEY = process.env.API_KEY || "";
-const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, "state.json");
+const RAILWAY = !!process.env.RAILWAY_ENVIRONMENT;
+// On Railway, use a mounted volume at /data if present; otherwise state is ephemeral.
+const DATA_FILE =
+  process.env.DATA_FILE || (RAILWAY && fs.existsSync("/data") ? "/data/state.json" : path.join(__dirname, "state.json"));
 
 const pad = (n) => String(n).padStart(2, "0");
 function today() {
@@ -206,10 +209,16 @@ async function handle(req, res) {
 }
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`http://127.0.0.1:${PORT}  (watch simulator)`);
-  for (const list of Object.values(os.networkInterfaces()))
-    for (const a of list || [])
-      if (a.family === "IPv4" && !a.internal) console.log(`http://${a.address}:${PORT}  (iPhone on the same Wi-Fi)`);
+  if (RAILWAY) {
+    const d = process.env.RAILWAY_PUBLIC_DOMAIN;
+    console.log(d ? `Railway: https://${d}` : "Railway: no public domain yet");
+    if (!API_KEY) console.warn("WARNING: no API_KEY set on a public server");
+  } else {
+    console.log(`http://127.0.0.1:${PORT}  (watch simulator)`);
+    for (const list of Object.values(os.networkInterfaces()))
+      for (const a of list || [])
+        if (a.family === "IPv4" && !a.internal) console.log(`http://${a.address}:${PORT}  (iPhone on the same Wi-Fi)`);
+  }
   console.log(API_KEY ? "API key required (x-api-key header or ?key=)" : "No API key required");
 });
 

@@ -8,7 +8,7 @@ Start it with `node server.js` (or `npm start`). Run the tests with `npm test`. 
 
 - `PORT`: default 48217.
 - `API_KEY`: if set, /state and /usage need the header `x-api-key` or the query `?key=`.
-- `DATA_FILE`: where state is saved, default `state.json` next to server.js.
+- `DATA_FILE`: where state is saved, default `state.json` next to server.js. On Railway the default is `/data/state.json` when a volume is mounted at /data. On Railway the default is `/data/state.json` when a volume is mounted at /data.
 
 ## Contract v1
 
@@ -41,3 +41,17 @@ On the first run Windows asks about the firewall. Allow Private networks, or the
 ## Exposure
 
 The server listens on the LAN over plain HTTP. Set API_KEY for demos so nobody on the Wi-Fi can zero taxMinutes, and make sure the API_KEY constant in the watch's Sync.mc matches it.
+
+## Deploy on Railway
+
+The server has no dependencies, so Railway builds it straight from package.json and runs `npm start`. Railway sets PORT and terminates HTTPS at its edge; the app serves plain HTTP behind it.
+
+1. Install the CLI: `npm i -g @railway/cli`.
+2. Run `railway login`.
+3. From the server/ folder, run `railway init`, then `railway up`.
+4. Set a key with `railway variables --set API_KEY=<random>`. Without it the server prints "WARNING: no API_KEY set on a public server" and anyone can change your minutes.
+5. Run `railway domain` to get the public address.
+
+Clients use `https://<domain>` and send the header `x-api-key`. The health check is `/health` (configured in railway.json).
+
+Optional: add a volume mounted at `/data`. The server then saves to `/data/state.json`. Without a volume the container filesystem is ephemeral and state resets on every redeploy or restart. That is harmless for the watch: a fresh state gets a new usageEpoch and the watch rebaselines.

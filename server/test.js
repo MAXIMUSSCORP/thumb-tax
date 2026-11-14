@@ -219,3 +219,38 @@ test("usageEpoch: added when saved state lacks it", async () => {
   await start();
   assert.strictEqual((await get()).usageEpoch, e);
 });
+
+// Railway startup output: separate child on its own port and temp DATA_FILE.
+async function bootOutput(extra) {
+  const port = 3998;
+  const data = path.join(os.tmpdir(), `wl-rw-${Math.random().toString(36).slice(2)}.json`);
+  const env = { ...process.env, PORT: String(port), DATA_FILE: data, API_KEY: "", RAILWAY_ENVIRONMENT: "", RAILWAY_PUBLIC_DOMAIN: "", ...extra };
+  const c = spawn(process.execPath, ["server.js"], { cwd: __dirname, env, stdio: ["ignore", "pipe", "pipe"] });
+  let out = "";
+  c.stdout.on("data", (d) => (out += d));
+  c.stderr.on("data", (d) => (out += d));
+  for (let i = 0; i < 50 && !/API key|No API key/.test(out); i++) await sleep(100);
+  const closed = new Promise((r) => c.once("close", r));
+  c.kill();
+  await closed;
+  fs.rmSync(data, { force: true });
+  return out;
+}
+
+test("railway: prints public URL, no LAN lines, warns without API_KEY", async () => {
+  const out = await bootOutput({ RAILWAY_ENVIRONMENT: "production", RAILWAY_PUBLIC_DOMAIN: "x.up.railway.app" });
+  assert.match(out, /Railway: https:\/\/x\.up\.railway\.app/);
+  assert.doesNotMatch(out, /same Wi-Fi/);
+  assert.match(out, /WARNING: no API_KEY set on a public server/);
+});
+
+test("railway: no domain yet, no warning when API_KEY set", async () => {
+  const out = await bootOutput({ RAILWAY_ENVIRONMENT: "production", API_KEY: "k" });
+  assert.match(out, /Railway: no public domain yet/);
+  assert.doesNotMatch(out, /WARNING/);
+});
+
+test("local run: no Railway line, no warning", async () => {
+  const out = await bootOutput({});
+  assert.doesNotMatch(out, /Railway|WARNING/);
+});
