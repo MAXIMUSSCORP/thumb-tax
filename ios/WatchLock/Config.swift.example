@@ -1,0 +1,54 @@
+// Template for Config.swift (which is gitignored). Copy to Config.swift and fill in.
+
+import Foundation
+
+/// Demo configuration, set in code. Change these and rebuild.
+/// Note: this file is committed to git, so don't put a real secret in apiKey.
+enum Config {
+    /// Where tax minutes come from. Switch this for testing, then rebuild.
+    ///   .locked   dummy data: red screen with testTaxMinutes and testActivity (no server needed)
+    ///   .unlocked dummy data: green screen with 0 tax minutes, "Open <app>" works (no server needed)
+    ///   .live     real data from the server at serverURL
+    static let mode: Mode = .unlocked
+
+    enum Mode {
+        case locked, unlocked, live
+    }
+
+    /// Dummy values used by .locked
+    static let testTaxMinutes = 12
+    static let testActivity = "Walk 500 steps"
+
+    /// Dummy earned scroll time used by .unlocked
+    static let testCreditMinutes = 15
+
+    /// The tax-minutes server on the laptop (same Wi-Fi). Use the 172.17.x address the server
+    /// prints at startup, not 172.24.x. Example: "http://172.17.0.5:48217"
+    static let serverURL = "http://LAPTOP-IP:48217"
+
+    /// Must match the server's API_KEY. Leave empty if the server has none.
+    static let apiKey = ""
+
+    /// Minutes of usage the "Scroll anyway" button reports (the watch turns it into tax).
+    static let scrollAnywayMinutes = 5
+
+    /// The app to open when Thumb Tax is launched directly (not from a shortcut link).
+    static let defaultApp = "Instagram"
+
+    /// The link your Home Screen shortcut opens, e.g. thumbtax://open?app=Instagram
+    /// (registered in project.yml under CFBundleURLTypes).
+    static let urlScheme = "thumbtax"
+
+    /// How the "Open <app>" button launches each app. Key = the app name in the shortcut's link (any case).
+    static let appURLSchemes: [String: String] = [
+        "instagram": "instagram://",
+        "tiktok": "snssdk1233://",
+        "youtube": "youtube://",
+        "x": "twitter://",
+        "twitter": "twitter://",
+        "reddit": "reddit://",
+        "facebook": "fb://",
+        "snapchat": "snapchat://",
+        "threads": "barcelona://",
+    ]
+}

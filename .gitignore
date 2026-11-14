@@ -32,3 +32,11 @@ PROGRESS.md
 server/state.json
 server/state.json.tmp
 server/node_modules/
+# iOS: local-only config and signing (single developer, never shared)
+ios/*.xcodeproj/
+ios/Config/
+ios/WatchLock/Config.swift
+ios/WatchLock/Info.plist
+xcuserdata/
+*.xcuserstate
+# Server runtime data
