@@ -41,30 +41,40 @@ class ActivityPickerView extends WatchUi.View {
     private function buildRows() as Array<Dictionary> {
         var all = Catalog.all();
         var rows = [] as Array<Dictionary>;
+        // Walk goes first, above every header.
+        for (var i = 0; i < all.size(); i++) {
+            if (all[i][:id] == :walk) {
+                rows.add(entryRow(all[i]));
+            }
+        }
         for (var g = 0; g < GROUPS.size(); g++) {
             var first = true;
             for (var i = 0; i < all.size(); i++) {
                 var e = all[i];
-                if (e[:group] != GROUPS[g]) {
+                if (e[:group] != GROUPS[g] || e[:id] == :walk) {
                     continue;
                 }
                 if (first) {
                     rows.add({:title => GROUP_NAMES[g], :header => true});
                     first = false;
                 }
-                var id = e[:id] as Symbol;
-                var claimed = e[:daily] == true && Ledger.claimedToday(id);
-                var label = e[:label];
-                rows.add({
-                    :id => id,
-                    :title => (label != null) ? label as String : "",
-                    :sub => claimed ? "claimed today" : rateText(e),
-                    :sub2 => (e[:verify] == :partly) ? "partly verified" : null,
-                    :disabled => claimed
-                });
+                rows.add(entryRow(e));
             }
         }
         return rows;
+    }
+
+    private function entryRow(e as Dictionary) as Dictionary {
+        var id = e[:id] as Symbol;
+        var claimed = e[:daily] == true && Ledger.claimedToday(id);
+        var label = e[:label];
+        return {
+            :id => id,
+            :title => (label != null) ? label as String : "",
+            :sub => claimed ? "claimed today" : rateText(e),
+            :sub2 => (e[:verify] == :partly) ? "partly verified" : null,
+            :disabled => claimed
+        };
     }
 
     // "+3s per rep", "+1.5 min per min", "+2 min per floor"; walking is paid per km.

@@ -7,6 +7,8 @@ import Toybox.Lang;
 module Alerts {
     var _prev as Number? = null;
     var _nightWarned as Boolean = false;
+    // Smaller rises are sync rounding after each server reconcile, not credits.
+    const MIN_GAIN_SEC = 30;
 
     function check(st as Dictionary) as Void {
         var b = st[:balanceSec];
@@ -15,7 +17,7 @@ module Alerts {
             var prev = _prev;
             // The first reading only sets the baseline, so nothing fires at app start.
             if (prev != null) {
-                if (bal > prev) {
+                if (bal - prev >= MIN_GAIN_SEC) {
                     Notify.show("TIME ADDED", ListUi.signedTime(bal - prev) + " to your bank", true);
                 } else if (prev >= 0 && bal < 0) {
                     // No buzz here: the Engine already vibrates on overdraft.

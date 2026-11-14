@@ -20,6 +20,7 @@ class AvatarView extends WatchUi.View {
     private var _timer as Timer.Timer or Null = null;
     // Live values refreshed once a second; _holdUntil is the end of a demo override (0 = none).
     private var _liveMood as Avatar.Mood = Avatar.MOOD_CLEAR;
+    private var _liveScrolling as Boolean = false;
     private var _amount as String = "0 min";
     private var _stamp as Number = 0;
     private var _holdUntil as Number = 0;
@@ -50,6 +51,7 @@ class AvatarView extends WatchUi.View {
             mood = Avatar.MOOD_REWARD;
         }
         _liveMood = mood;
+        _liveScrolling = scrolling;
         _amount = (bal < 0) ? "-" + Records.fmtMin(bal / 60) + " owed" : "+" + Records.fmtMin(bal / 60);
     }
 
@@ -135,7 +137,12 @@ class AvatarView extends WatchUi.View {
         dc.setColor(color, Graphics.COLOR_TRANSPARENT);
         dc.drawText(cx, (h * 0.77).toNumber(), Graphics.FONT_MEDIUM, _amount, j);
         dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, (h * 0.87).toNumber(), Graphics.FONT_XTINY, NOTES[_index], j);
+        // Overdrawn without scrolling is a debt, not a charge; the demo preview keeps the original note.
+        var note = NOTES[_index];
+        if (_holdUntil == 0 && MOODS[_index] == Avatar.MOOD_TAXED && !_liveScrolling) {
+            note = "time owed";
+        }
+        dc.drawText(cx, (h * 0.87).toNumber(), Graphics.FONT_XTINY, note, j);
 
         // Page dots.
         var n = MOODS.size();
