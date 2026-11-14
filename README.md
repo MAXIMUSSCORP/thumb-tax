@@ -41,4 +41,4 @@ Target: Garmin fenix 7 Pro, API 5.2.0.
 
 ## Status
 
-Built on the day of the Tech Thursday x Garmin hackathon in Calgary. What exists now: the M0 sensor test screen, compiled for fenix7pro. It has not been tested on the real watch yet. The detector, tax meter, vibration and morning statement are planned, not built. See PROGRESS.md for where each milestone stands and PLAN.md for the plan.
+Built on the day of the Tech Thursday x Garmin hackathon in Calgary. What exists now: the M0 sensor test screen, compiled for fenix7pro. It has not been tested on the real watch yet. The detector, tax meter, vibration and morning statement are planned, not built.
